@@ -1,27 +1,25 @@
 "use client"
 
 import { useEffect } from "react"
-import { supabase } from "../lib/supabaseClient"
+import { useRouter } from "next/navigation"
 
 export default function Home() {
+  const router = useRouter()
 
-  useEffect(() => {
-    async function testConnection() {
-      const { data, error } = await supabase
-        .from('test')
-        .select('*')
-
-      console.log("DATA:", data)
-      console.log("ERROR:", error)
-    }
-
-    testConnection()
+  useEffect(function () {
+    router.push("/login")
   }, [])
 
   return (
-    <div>
-      <h1>Test Supabase</h1>
-      <p>Cek console browser</p>
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      fontFamily: "'Segoe UI', system-ui, sans-serif",
+    }}>
+      <p style={{ color: "white", fontSize: "18px" }}>Loading...</p>
     </div>
   )
 }
