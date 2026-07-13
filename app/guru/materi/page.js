@@ -9,6 +9,8 @@ export default function GuruMateriPage() {
   const [user, setUser] = useState(null)
   const [materiList, setMateriList] = useState([])
   const [modulList, setModulList] = useState([])
+  const [kelasList, setKelasList] = useState([])
+  const [tingkatList, setTingkatList] = useState([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -16,12 +18,14 @@ export default function GuruMateriPage() {
   const [generatingAI, setGeneratingAI] = useState(false)
   const [viewModul, setViewModul] = useState(null)
   const [tab, setTab] = useState("materi")
+  const [filterTingkat, setFilterTingkat] = useState("semua")
   const router = useRouter()
 
   const [judul, setJudul] = useState("")
   const [isi, setIsi] = useState("")
   const [file, setFile] = useState(null)
   const [pertemuanKe, setPertemuanKe] = useState(1)
+  const [tingkat, setTingkat] = useState("")
   const [namaPenyusun, setNamaPenyusun] = useState("")
   const [satuanPendidikan, setSatuanPendidikan] = useState("")
   const [mataPelajaran, setMataPelajaran] = useState("")
@@ -43,26 +47,60 @@ export default function GuruMateriPage() {
 
     setUser(userResult.data)
     setNamaPenyusun(userResult.data.nama)
+
+    var kelasResult = await supabase.from("kelas").select("*").order("jenjang").order("tingkat").order("rombel")
+    setKelasList(kelasResult.data || [])
+
+    var uniqueTingkat = []
+    var seen = {}
+    if (kelasResult.data) {
+      kelasResult.data.forEach(function (k) {
+        if (!seen[k.tingkat]) {
+          seen[k.tingkat] = true
+          uniqueTingkat.push({ tingkat: k.tingkat, jenjang: k.jenjang })
+        }
+      })
+    }
+    setTingkatList(uniqueTingkat)
+
+    if (uniqueTingkat.length > 0) {
+      setTingkat(uniqueTingkat[0].tingkat)
+      setJenjang(uniqueTingkat[0].jenjang || "")
+      setKelas(uniqueTingkat[0].tingkat)
+    }
+
     await loadMateri(authUser.id)
     await loadModul(authUser.id)
     setLoading(false)
   }
 
   async function loadMateri(guruId) {
-    var result = await supabase.from("materi").select("*").eq("guru_id", guruId).order("pertemuan_ke", { ascending: true })
+    var result = await supabase.from("materi").select("*").eq("guru_id", guruId).order("tingkat").order("pertemuan_ke", { ascending: true })
     setMateriList(result.data || [])
-    setPertemuanKe((result.data || []).length + 1)
   }
 
   async function loadModul(guruId) {
-    var result = await supabase.from("modul_ajar").select("*").eq("guru_id", guruId).order("pertemuan_ke", { ascending: true })
+    var result = await supabase.from("modul_ajar").select("*").eq("guru_id", guruId).order("tingkat").order("pertemuan_ke", { ascending: true })
     setModulList(result.data || [])
+  }
+
+  function handleTingkatChange(val) {
+    setTingkat(val)
+    var found = tingkatList.find(function (t) { return t.tingkat === val })
+    if (found) {
+      setJenjang(found.jenjang || "")
+      setKelas(val)
+    }
+
+    var materiForTingkat = materiList.filter(function (m) { return m.tingkat === val })
+    setPertemuanKe(materiForTingkat.length + 1)
   }
 
   async function handleUpload(e) {
     e.preventDefault()
     if (!judul || !isi) { setPesan("❌ Judul dan isi wajib diisi!"); return }
-    if (!satuanPendidikan || !mataPelajaran || !kelas) { setPesan("❌ Data sekolah wajib diisi!"); return }
+    if (!tingkat) { setPesan("❌ Pilih tingkat kelas!"); return }
+    if (!satuanPendidikan || !mataPelajaran) { setPesan("❌ Data sekolah wajib diisi!"); return }
 
     setSubmitting(true)
     setPesan("")
@@ -77,16 +115,16 @@ export default function GuruMateriPage() {
 
     var insertResult = await supabase.from("materi").insert({
       judul: judul, isi: isi, file_url: fileUrl, guru_id: user.id,
-      pertemuan_ke: pertemuanKe, nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
-      mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang, kelas: kelas,
-      semester: semester, alokasi_waktu: alokasiWaktu,
+      pertemuan_ke: pertemuanKe, tingkat: tingkat,
+      nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
+      mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang,
+      kelas: kelas, semester: semester, alokasi_waktu: alokasiWaktu,
     }).select().single()
 
     if (insertResult.error) { setPesan("❌ Gagal simpan: " + insertResult.error.message); setSubmitting(false); return }
 
     var materiBaru = insertResult.data
 
-    // Generate Modul Ajar
     setGeneratingAI(true)
     setPesan("⏳ Materi tersimpan! Ihsan AI sedang membuat Modul Ajar...")
 
@@ -100,7 +138,7 @@ export default function GuruMateriPage() {
     if (aiResult.success) {
       var d = aiResult.data
       var modulInsert = await supabase.from("modul_ajar").insert({
-        materi_id: materiBaru.id, guru_id: user.id,
+        materi_id: materiBaru.id, guru_id: user.id, tingkat: tingkat,
         nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
         mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang,
         kelas: kelas, semester: semester, alokasi_waktu: alokasiWaktu,
@@ -118,7 +156,7 @@ export default function GuruMateriPage() {
       if (modulInsert.error) {
         setPesan("✅ Materi tersimpan! Tapi gagal simpan modul: " + modulInsert.error.message)
       } else {
-        setPesan("🎉 Materi & Modul Ajar Level " + aiResult.level + " berhasil dibuat oleh Ihsan AI!")
+        setPesan("🎉 Materi & Modul Ajar Level " + aiResult.level + " untuk kelas " + tingkat + " berhasil!")
       }
     } else {
       setPesan("✅ Materi tersimpan! Tapi gagal generate modul: " + aiResult.error)
@@ -146,10 +184,11 @@ export default function GuruMateriPage() {
     return colors[level] || "#667eea"
   }
 
+  var filteredMateri = filterTingkat === "semua" ? materiList : materiList.filter(function (m) { return m.tingkat === filterTingkat })
+  var filteredModul = filterTingkat === "semua" ? modulList : modulList.filter(function (m) { return m.tingkat === filterTingkat })
+
   if (loading) {
-    return (
-      <div style={st.center}><div style={st.spinner}></div><p style={{ marginTop: "16px", color: "#666" }}>Loading...</p></div>
-    )
+    return (<div style={st.center}><div style={st.spinner}></div><p style={{ marginTop: "16px", color: "#666" }}>Loading...</p></div>)
   }
 
   return (
@@ -170,7 +209,7 @@ export default function GuruMateriPage() {
 
       <div style={st.infoCard}>
         <p style={{ margin: 0, fontSize: "14px" }}>
-          🤖 <strong>Ihsan AI</strong> otomatis membuat Modul Ajar lengkap (Level 1-5) setiap kali guru upload materi!
+          🤖 <strong>Ihsan AI</strong> otomatis membuat Modul Ajar per tingkat kelas. Semua rombel dalam tingkat yang sama mendapat materi yang sama!
         </p>
       </div>
 
@@ -179,6 +218,18 @@ export default function GuruMateriPage() {
         <div style={st.formCard}>
           <h2 style={st.formTitle}>➕ Upload Materi + Generate Modul Ajar</h2>
           <form onSubmit={handleUpload}>
+            <p style={st.sectionLabel}>🏫 Tingkat Kelas</p>
+            <div style={st.inputGroup}>
+              <label style={st.label}>Pilih Tingkat Kelas *</label>
+              <select value={tingkat} onChange={function (e) { handleTingkatChange(e.target.value) }} style={st.select}>
+                <option value="">-- Pilih Tingkat --</option>
+                {tingkatList.map(function (t) {
+                  return <option key={t.tingkat} value={t.tingkat}>{t.jenjang} - Kelas {t.tingkat}</option>
+                })}
+              </select>
+              <p style={st.hint}>Materi akan berlaku untuk semua rombel di tingkat ini (contoh: VII-A, VII-B, VII-C)</p>
+            </div>
+
             <p style={st.sectionLabel}>📋 Data Sekolah</p>
             <div style={st.row2}>
               <div style={st.inputGroup}>
@@ -202,18 +253,8 @@ export default function GuruMateriPage() {
             </div>
             <div style={st.row2}>
               <div style={st.inputGroup}>
-                <label style={st.label}>Jenjang</label>
-                <input type="text" placeholder="MTs / MA" value={jenjang} onChange={function (e) { setJenjang(e.target.value) }} style={st.input} />
-              </div>
-              <div style={st.inputGroup}>
-                <label style={st.label}>Kelas *</label>
-                <input type="text" placeholder="VII / X" value={kelas} onChange={function (e) { setKelas(e.target.value) }} style={st.input} />
-              </div>
-            </div>
-            <div style={st.row2}>
-              <div style={st.inputGroup}>
                 <label style={st.label}>Semester</label>
-                <select value={semester} onChange={function (e) { setSemester(e.target.value) }} style={st.input}>
+                <select value={semester} onChange={function (e) { setSemester(e.target.value) }} style={st.select}>
                   <option value="Gasal">Gasal</option>
                   <option value="Genap">Genap</option>
                 </select>
@@ -228,14 +269,14 @@ export default function GuruMateriPage() {
             <div style={st.inputGroup}>
               <label style={st.label}>Pertemuan Ke-</label>
               <input type="number" min="1" value={pertemuanKe} onChange={function (e) { setPertemuanKe(Number(e.target.value)) }} style={{ ...st.input, width: "120px" }} />
-              <p style={st.hint}>🤖 Modul akan di-generate sebagai Level {((pertemuanKe - 1) % 5) + 1}</p>
+              <p style={st.hint}>🤖 Modul = Level {((pertemuanKe - 1) % 5) + 1}</p>
             </div>
             <div style={st.inputGroup}>
               <label style={st.label}>Judul Materi *</label>
               <input type="text" placeholder="Contoh: Konsep Bersuci (Thaharah)" value={judul} onChange={function (e) { setJudul(e.target.value) }} style={st.input} />
             </div>
             <div style={st.inputGroup}>
-              <label style={st.label}>Isi / Penjelasan Materi *</label>
+              <label style={st.label}>Isi Materi *</label>
               <textarea placeholder="Tulis penjelasan materi..." value={isi} onChange={function (e) { setIsi(e.target.value) }} style={st.textarea} rows={8} />
             </div>
             <div style={st.inputGroup}>
@@ -244,34 +285,46 @@ export default function GuruMateriPage() {
             </div>
 
             <button type="submit" disabled={submitting || generatingAI} style={{ ...st.submitBtn, opacity: submitting || generatingAI ? 0.7 : 1 }}>
-              {generatingAI ? "🤖 Ihsan AI sedang membuat Modul Ajar..." : submitting ? "⏳ Menyimpan..." : "💾 Simpan & Generate Modul Ajar"}
+              {generatingAI ? "🤖 Ihsan AI membuat Modul..." : submitting ? "⏳ Menyimpan..." : "💾 Simpan & Generate Modul"}
             </button>
           </form>
         </div>
       )}
 
+      {/* FILTER TINGKAT */}
+      <div style={st.filterWrap}>
+        <label style={{ fontSize: "14px", fontWeight: "600" }}>Filter Tingkat:</label>
+        <select value={filterTingkat} onChange={function (e) { setFilterTingkat(e.target.value) }} style={st.filterSelect}>
+          <option value="semua">Semua Tingkat</option>
+          {tingkatList.map(function (t) {
+            return <option key={t.tingkat} value={t.tingkat}>{t.jenjang} - {t.tingkat}</option>
+          })}
+        </select>
+      </div>
+
       {/* TABS */}
       <div style={st.tabWrap}>
         <button onClick={function () { setTab("materi"); setViewModul(null) }} style={{ ...st.tabBtn, background: tab === "materi" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "materi" ? "white" : "#374151" }}>
-          📚 Materi ({materiList.length})
+          📚 Materi ({filteredMateri.length})
         </button>
         <button onClick={function () { setTab("modul"); setViewModul(null) }} style={{ ...st.tabBtn, background: tab === "modul" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "modul" ? "white" : "#374151" }}>
-          📋 Modul Ajar ({modulList.length})
+          📋 Modul Ajar ({filteredModul.length})
         </button>
       </div>
 
       {/* TAB MATERI */}
       {tab === "materi" && (
         <div>
-          {materiList.length === 0 ? (
+          {filteredMateri.length === 0 ? (
             <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada materi.</p></div>
           ) : (
             <div style={st.grid}>
-              {materiList.map(function (item) {
+              {filteredMateri.map(function (item) {
                 var lvl = ((item.pertemuan_ke - 1) % 5) + 1
                 return (
                   <div key={item.id} style={st.card}>
                     <div style={st.cardTags}>
+                      <span style={st.tingkatBadge}>🏫 {item.tingkat}</span>
                       <span style={st.pertemuanBadge}>Pertemuan {item.pertemuan_ke}</span>
                       <span style={{ ...st.levelBadge, background: getLevelColor(lvl) }}>Level {lvl}</span>
                     </div>
@@ -288,17 +341,18 @@ export default function GuruMateriPage() {
         </div>
       )}
 
-      {/* TAB MODUL */}
+      {/* TAB MODUL LIST */}
       {tab === "modul" && !viewModul && (
         <div>
-          {modulList.length === 0 ? (
-            <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada modul ajar.</p></div>
+          {filteredModul.length === 0 ? (
+            <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada modul.</p></div>
           ) : (
             <div style={st.grid}>
-              {modulList.map(function (m) {
+              {filteredModul.map(function (m) {
                 return (
                   <div key={m.id} style={st.card} onClick={function () { setViewModul(m) }}>
                     <div style={st.cardTags}>
+                      <span style={st.tingkatBadge}>🏫 {m.tingkat}</span>
                       <span style={st.pertemuanBadge}>Pertemuan {m.pertemuan_ke}</span>
                       <span style={{ ...st.levelBadge, background: getLevelColor(m.level_ke) }}>Level {m.level_ke}</span>
                       <span style={st.aiBadge}>🤖 AI</span>
@@ -319,90 +373,42 @@ export default function GuruMateriPage() {
       {tab === "modul" && viewModul && (
         <div style={st.modulView}>
           <button onClick={function () { setViewModul(null) }} style={st.backModulBtn}>← Kembali ke Daftar</button>
+          <div style={st.modulHeader}><h2 style={st.modulTitle}>MODUL AJAR PERTEMUAN {viewModul.pertemuan_ke} (LEVEL {viewModul.level_ke})</h2></div>
 
-          <div style={st.modulHeader}>
-            <h2 style={st.modulTitle}>MODUL AJAR PERTEMUAN {viewModul.pertemuan_ke} (LEVEL {viewModul.level_ke})</h2>
-          </div>
-
-          {/* I. INFORMASI UMUM */}
           <div style={st.modulSection}>
             <h3 style={st.modulSectionTitle}>I. KOMPONEN INFORMASI UMUM</h3>
-            <table style={st.infoTable}>
-              <tbody>
-                <tr><td style={st.tdLabel}>Nama Penyusun / Satuan Pendidikan</td><td style={st.tdValue}>{viewModul.nama_penyusun} / {viewModul.satuan_pendidikan}</td></tr>
-                <tr><td style={st.tdLabel}>Mata Pelajaran / Fase / Jenjang</td><td style={st.tdValue}>{viewModul.mata_pelajaran} / {viewModul.fase} / {viewModul.jenjang}</td></tr>
-                <tr><td style={st.tdLabel}>Kelas / Semester / Alokasi Waktu</td><td style={st.tdValue}>{viewModul.kelas} / {viewModul.semester} / {viewModul.alokasi_waktu}</td></tr>
-                <tr><td style={st.tdLabel}>Materi Pokok / Topik</td><td style={st.tdValue}>{viewModul.topik_pembahasan}</td></tr>
-                <tr><td style={st.tdLabel}>Profil Pelajar</td><td style={st.tdValue}>{viewModul.profil_pelajar}</td></tr>
-              </tbody>
-            </table>
+            <table style={st.infoTable}><tbody>
+              <tr><td style={st.tdLabel}>Nama Penyusun / Satuan Pendidikan</td><td style={st.tdValue}>{viewModul.nama_penyusun} / {viewModul.satuan_pendidikan}</td></tr>
+              <tr><td style={st.tdLabel}>Mata Pelajaran / Fase / Jenjang</td><td style={st.tdValue}>{viewModul.mata_pelajaran} / {viewModul.fase} / {viewModul.jenjang}</td></tr>
+              <tr><td style={st.tdLabel}>Kelas / Semester / Alokasi Waktu</td><td style={st.tdValue}>{viewModul.kelas} / {viewModul.semester} / {viewModul.alokasi_waktu}</td></tr>
+              <tr><td style={st.tdLabel}>Tingkat / Rombel</td><td style={st.tdValue}>{viewModul.tingkat} (Semua Rombel)</td></tr>
+              <tr><td style={st.tdLabel}>Topik</td><td style={st.tdValue}>{viewModul.topik_pembahasan}</td></tr>
+              <tr><td style={st.tdLabel}>Profil Pelajar</td><td style={st.tdValue}>{viewModul.profil_pelajar}</td></tr>
+            </tbody></table>
           </div>
 
-          {/* II. TUJUAN */}
           <div style={st.modulSection}>
             <h3 style={st.modulSectionTitle}>II. KOMPONEN INTI & TUJUAN PEMBELAJARAN</h3>
-            <div style={st.modulBlock}>
-              <p style={st.modulBlockLabel}>1. Tujuan Pembelajaran:</p>
-              <p style={st.modulBlockText}>{viewModul.tujuan_pembelajaran}</p>
-            </div>
-            <div style={st.modulBlock}>
-              <p style={st.modulBlockLabel}>2. Media & Alat Belajar:</p>
-              <p style={st.modulBlockText}><strong>Media Digital:</strong> {viewModul.media_digital}</p>
-              <p style={st.modulBlockText}><strong>Media Konkret:</strong> {viewModul.media_konkret}</p>
-            </div>
+            <div style={st.modulBlock}><p style={st.modulBlockLabel}>1. Tujuan Pembelajaran:</p><p style={st.modulBlockText}>{viewModul.tujuan_pembelajaran}</p></div>
+            <div style={st.modulBlock}><p style={st.modulBlockLabel}>2. Media & Alat Belajar:</p><p style={st.modulBlockText}><strong>Media Digital:</strong> {viewModul.media_digital}</p><p style={st.modulBlockText}><strong>Media Konkret:</strong> {viewModul.media_konkret}</p></div>
           </div>
 
-          {/* III. SKENARIO */}
           <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>III. SKENARIO PEMBELAJARAN (FOKUS: LEVEL {viewModul.level_ke})</h3>
+            <h3 style={st.modulSectionTitle}>III. SKENARIO PEMBELAJARAN (LEVEL {viewModul.level_ke})</h3>
             <p style={st.modulFokus}>{viewModul.fokus_level}</p>
-
-            <div style={st.skenarioCard}>
-              <h4 style={st.skenarioTitle}>📌 Pendahuluan (15 Menit)</h4>
-              <p style={st.skenarioText}>{viewModul.pendahuluan}</p>
-            </div>
-
-            <div style={st.skenarioCard}>
-              <h4 style={st.skenarioTitle}>📌 Aktivitas Inti (60 Menit)</h4>
-              <p style={st.skenarioText}>{viewModul.aktivitas_inti}</p>
-            </div>
-
-            <div style={st.skenarioCard}>
-              <h4 style={st.skenarioTitle}>📌 Penutup & Refleksi (15 Menit)</h4>
-              <p style={st.skenarioText}>{viewModul.penutup}</p>
-            </div>
-
-            <div style={st.refleksiCard}>
-              <h4 style={{ margin: "0 0 8px 0", fontSize: "14px" }}>🪞 Refleksi Makna:</h4>
-              <p style={{ margin: 0, fontSize: "14px", fontStyle: "italic", lineHeight: "1.6" }}>{viewModul.refleksi}</p>
-            </div>
+            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Pendahuluan (15 Menit)</h4><p style={st.skenarioText}>{viewModul.pendahuluan}</p></div>
+            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Aktivitas Inti (60 Menit)</h4><p style={st.skenarioText}>{viewModul.aktivitas_inti}</p></div>
+            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Penutup (15 Menit)</h4><p style={st.skenarioText}>{viewModul.penutup}</p></div>
+            <div style={st.refleksiCard}><h4 style={{ margin: "0 0 8px 0", fontSize: "14px" }}>🪞 Refleksi:</h4><p style={{ margin: 0, fontSize: "14px", fontStyle: "italic", lineHeight: "1.6" }}>{viewModul.refleksi}</p></div>
           </div>
 
-          {/* IV. ASESMEN */}
           <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>IV. INSTRUMEN ASESMEN & RUBRIK PENILAIAN</h3>
+            <h3 style={st.modulSectionTitle}>IV. ASESMEN & RUBRIK PENILAIAN</h3>
             <table style={st.asesmenTable}>
-              <thead>
-                <tr>
-                  <th style={st.th}>Aspek yang Dinilai</th>
-                  <th style={st.th}>Kriteria Skor 1-2 (Dasar)</th>
-                  <th style={st.th}>Kriteria Skor 3-4 (Mahir)</th>
-                  <th style={st.th}>Bobot</th>
-                </tr>
-              </thead>
+              <thead><tr><th style={st.th}>Aspek</th><th style={st.th}>Skor 1-2 (Dasar)</th><th style={st.th}>Skor 3-4 (Mahir)</th><th style={st.th}>Bobot</th></tr></thead>
               <tbody>
-                <tr>
-                  <td style={st.td}>{viewModul.asesmen_aspek1_nama}</td>
-                  <td style={st.td}>{viewModul.asesmen_aspek1_dasar}</td>
-                  <td style={st.td}>{viewModul.asesmen_aspek1_mahir}</td>
-                  <td style={st.tdCenter}>{viewModul.asesmen_aspek1_bobot}</td>
-                </tr>
-                <tr>
-                  <td style={st.td}>{viewModul.asesmen_aspek2_nama}</td>
-                  <td style={st.td}>{viewModul.asesmen_aspek2_dasar}</td>
-                  <td style={st.td}>{viewModul.asesmen_aspek2_mahir}</td>
-                  <td style={st.tdCenter}>{viewModul.asesmen_aspek2_bobot}</td>
-                </tr>
+                <tr><td style={st.td}>{viewModul.asesmen_aspek1_nama}</td><td style={st.td}>{viewModul.asesmen_aspek1_dasar}</td><td style={st.td}>{viewModul.asesmen_aspek1_mahir}</td><td style={st.tdCenter}>{viewModul.asesmen_aspek1_bobot}</td></tr>
+                <tr><td style={st.td}>{viewModul.asesmen_aspek2_nama}</td><td style={st.td}>{viewModul.asesmen_aspek2_dasar}</td><td style={st.td}>{viewModul.asesmen_aspek2_mahir}</td><td style={st.tdCenter}>{viewModul.asesmen_aspek2_bobot}</td></tr>
               </tbody>
             </table>
           </div>
@@ -429,16 +435,20 @@ var st = {
   inputGroup: { marginBottom: "16px" },
   label: { display: "block", marginBottom: "6px", fontWeight: "600", fontSize: "13px", color: "#374151" },
   input: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box" },
+  select: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", background: "white" },
   textarea: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
   fileInput: { width: "100%", padding: "10px", border: "2px dashed #d1d5db", borderRadius: "8px", boxSizing: "border-box" },
   hint: { margin: "4px 0 0 0", fontSize: "12px", color: "#6b7280", fontStyle: "italic" },
   submitBtn: { width: "100%", padding: "14px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "16px", fontWeight: "700" },
+  filterWrap: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px", background: "white", padding: "12px 16px", borderRadius: "10px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+  filterSelect: { padding: "8px 12px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", background: "white" },
   tabWrap: { display: "flex", gap: "10px", marginBottom: "20px", flexWrap: "wrap" },
   tabBtn: { padding: "12px 24px", borderRadius: "10px", border: "2px solid #e5e7eb", cursor: "pointer", fontWeight: "600", fontSize: "14px" },
   empty: { textAlign: "center", background: "white", padding: "48px", borderRadius: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" },
   card: { background: "white", padding: "20px", borderRadius: "14px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", cursor: "pointer" },
   cardTags: { display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" },
+  tingkatBadge: { padding: "3px 10px", background: "#fef3c7", color: "#92400e", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
   pertemuanBadge: { padding: "3px 10px", background: "#dbeafe", color: "#1e40af", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
   levelBadge: { padding: "3px 10px", color: "white", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
   aiBadge: { padding: "3px 10px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
@@ -448,7 +458,6 @@ var st = {
   fileLink: { display: "inline-block", marginBottom: "8px", color: "#3b82f6", fontSize: "13px", fontWeight: "600", textDecoration: "none" },
   hapusBtn: { display: "block", width: "100%", padding: "8px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", fontSize: "13px" },
   viewBtn: { padding: "8px 14px", background: "#eef2ff", color: "#667eea", borderRadius: "8px", textAlign: "center", fontWeight: "600", fontSize: "13px" },
-  // MODUL VIEW
   modulView: { background: "white", padding: "32px", borderRadius: "16px", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" },
   backModulBtn: { padding: "8px 16px", background: "#f3f4f6", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", marginBottom: "20px", color: "#374151" },
   modulHeader: { textAlign: "center", marginBottom: "28px", borderBottom: "3px solid #667eea", paddingBottom: "16px" },
