@@ -2,28 +2,27 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "../../../lib/supabaseClient"
-import { generateModulAjar } from "../../../lib/gemini"
 import { useRouter } from "next/navigation"
+import RichEditor from "../../../components/RichEditor"
 
 export default function GuruMateriPage() {
   const [user, setUser] = useState(null)
   const [materiList, setMateriList] = useState([])
-  const [modulList, setModulList] = useState([])
   const [kelasList, setKelasList] = useState([])
   const [tingkatList, setTingkatList] = useState([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [pesan, setPesan] = useState("")
-  const [generatingAI, setGeneratingAI] = useState(false)
-  const [viewModul, setViewModul] = useState(null)
-  const [tab, setTab] = useState("materi")
   const [filterTingkat, setFilterTingkat] = useState("semua")
+  const [editMode, setEditMode] = useState(false)
+  const [editId, setEditId] = useState(null)
   const router = useRouter()
 
   const [judul, setJudul] = useState("")
   const [isi, setIsi] = useState("")
   const [file, setFile] = useState(null)
+  const [fileLama, setFileLama] = useState(null)
   const [pertemuanKe, setPertemuanKe] = useState(1)
   const [tingkat, setTingkat] = useState("")
   const [namaPenyusun, setNamaPenyusun] = useState("")
@@ -70,18 +69,12 @@ export default function GuruMateriPage() {
     }
 
     await loadMateri(authUser.id)
-    await loadModul(authUser.id)
     setLoading(false)
   }
 
   async function loadMateri(guruId) {
     var result = await supabase.from("materi").select("*").eq("guru_id", guruId).order("tingkat").order("pertemuan_ke", { ascending: true })
     setMateriList(result.data || [])
-  }
-
-  async function loadModul(guruId) {
-    var result = await supabase.from("modul_ajar").select("*").eq("guru_id", guruId).order("tingkat").order("pertemuan_ke", { ascending: true })
-    setModulList(result.data || [])
   }
 
   function handleTingkatChange(val) {
@@ -92,11 +85,50 @@ export default function GuruMateriPage() {
       setKelas(val)
     }
 
-    var materiForTingkat = materiList.filter(function (m) { return m.tingkat === val })
-    setPertemuanKe(materiForTingkat.length + 1)
+    if (!editMode) {
+      var materiForTingkat = materiList.filter(function (m) { return m.tingkat === val })
+      setPertemuanKe(materiForTingkat.length + 1)
+    }
   }
 
-  async function handleUpload(e) {
+  function resetForm() {
+    setJudul("")
+    setIsi("")
+    setFile(null)
+    setFileLama(null)
+    setEditMode(false)
+    setEditId(null)
+    setPertemuanKe(1)
+    setSatuanPendidikan("")
+    setMataPelajaran("")
+    setFase("")
+    setSemester("Gasal")
+    setAlokasiWaktu("2 x 45 Menit")
+  }
+
+  function handleEdit(item) {
+    setEditMode(true)
+    setEditId(item.id)
+    setJudul(item.judul || "")
+    setIsi(item.isi || "")
+    setFileLama(item.file_url || null)
+    setFile(null)
+    setPertemuanKe(item.pertemuan_ke || 1)
+    setTingkat(item.tingkat || "")
+    setNamaPenyusun(item.nama_penyusun || "")
+    setSatuanPendidikan(item.satuan_pendidikan || "")
+    setMataPelajaran(item.mata_pelajaran || "")
+    setFase(item.fase || "")
+    setJenjang(item.jenjang || "")
+    setKelas(item.kelas || item.tingkat || "")
+    setSemester(item.semester || "Gasal")
+    setAlokasiWaktu(item.alokasi_waktu || "2 x 45 Menit")
+    setShowForm(true)
+    setPesan("")
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!judul || !isi) { setPesan("❌ Judul dan isi wajib diisi!"); return }
     if (!tingkat) { setPesan("❌ Pilih tingkat kelas!"); return }
@@ -105,7 +137,7 @@ export default function GuruMateriPage() {
     setSubmitting(true)
     setPesan("")
 
-    var fileUrl = null
+    var fileUrl = fileLama
     if (file) {
       var fileName = Date.now().toString() + "_" + file.name
       var uploadResult = await supabase.storage.from("materi-files").upload(fileName, file)
@@ -113,79 +145,62 @@ export default function GuruMateriPage() {
       fileUrl = supabase.storage.from("materi-files").getPublicUrl(fileName).data.publicUrl
     }
 
-    var insertResult = await supabase.from("materi").insert({
-      judul: judul, isi: isi, file_url: fileUrl, guru_id: user.id,
-      pertemuan_ke: pertemuanKe, tingkat: tingkat,
-      nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
-      mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang,
-      kelas: kelas, semester: semester, alokasi_waktu: alokasiWaktu,
-    }).select().single()
-
-    if (insertResult.error) { setPesan("❌ Gagal simpan: " + insertResult.error.message); setSubmitting(false); return }
-
-    var materiBaru = insertResult.data
-
-    setGeneratingAI(true)
-    setPesan("⏳ Materi tersimpan! Ihsan AI sedang membuat Modul Ajar...")
-
-    var aiResult = await generateModulAjar({
-      nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
-      mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang,
-      kelas: kelas, semester: semester, alokasi_waktu: alokasiWaktu,
-      pertemuan_ke: pertemuanKe, judul: judul, isi: isi,
-    })
-
-    if (aiResult.success) {
-      var d = aiResult.data
-      var modulInsert = await supabase.from("modul_ajar").insert({
-        materi_id: materiBaru.id, guru_id: user.id, tingkat: tingkat,
-        nama_penyusun: namaPenyusun, satuan_pendidikan: satuanPendidikan,
-        mata_pelajaran: mataPelajaran, fase: fase, jenjang: jenjang,
-        kelas: kelas, semester: semester, alokasi_waktu: alokasiWaktu,
-        topik_pembahasan: d.topik_pembahasan, profil_pelajar: d.profil_pelajar,
-        pertemuan_ke: pertemuanKe, level_ke: aiResult.level, fokus_level: d.fokus_level || aiResult.fokus_level,
-        tujuan_pembelajaran: d.tujuan_pembelajaran, media_digital: d.media_digital, media_konkret: d.media_konkret,
-        pendahuluan: d.pendahuluan, aktivitas_inti: d.aktivitas_inti,
-        penutup: d.penutup, refleksi: d.refleksi,
-        asesmen_aspek1_nama: d.asesmen_aspek1_nama, asesmen_aspek1_dasar: d.asesmen_aspek1_dasar,
-        asesmen_aspek1_mahir: d.asesmen_aspek1_mahir, asesmen_aspek1_bobot: d.asesmen_aspek1_bobot,
-        asesmen_aspek2_nama: d.asesmen_aspek2_nama, asesmen_aspek2_dasar: d.asesmen_aspek2_dasar,
-        asesmen_aspek2_mahir: d.asesmen_aspek2_mahir, asesmen_aspek2_bobot: d.asesmen_aspek2_bobot,
-      })
-
-      if (modulInsert.error) {
-        setPesan("✅ Materi tersimpan! Tapi gagal simpan modul: " + modulInsert.error.message)
-      } else {
-        setPesan("🎉 Materi & Modul Ajar Level " + aiResult.level + " untuk kelas " + tingkat + " berhasil!")
-      }
-    } else {
-      setPesan("✅ Materi tersimpan! Tapi gagal generate modul: " + aiResult.error)
+    var dataMateri = {
+      judul: judul,
+      isi: isi,
+      file_url: fileUrl,
+      guru_id: user.id,
+      pertemuan_ke: pertemuanKe,
+      tingkat: tingkat,
+      nama_penyusun: namaPenyusun,
+      satuan_pendidikan: satuanPendidikan,
+      mata_pelajaran: mataPelajaran,
+      fase: fase,
+      jenjang: jenjang,
+      kelas: kelas,
+      semester: semester,
+      alokasi_waktu: alokasiWaktu,
     }
 
-    setGeneratingAI(false)
-    setJudul(""); setIsi(""); setFile(null); setShowForm(false)
+    if (editMode) {
+      var updateResult = await supabase.from("materi").update(dataMateri).eq("id", editId)
+      if (updateResult.error) {
+        setPesan("❌ Gagal update: " + updateResult.error.message)
+        setSubmitting(false)
+        return
+      }
+      setPesan("✅ Materi berhasil diupdate!")
+    } else {
+      var insertResult = await supabase.from("materi").insert(dataMateri)
+      if (insertResult.error) {
+        setPesan("❌ Gagal simpan: " + insertResult.error.message)
+        setSubmitting(false)
+        return
+      }
+      setPesan("🎉 Materi berhasil disimpan!")
+    }
+
+    resetForm()
+    setShowForm(false)
     await loadMateri(user.id)
-    await loadModul(user.id)
     setSubmitting(false)
   }
 
   async function handleHapus(id, fileUrl) {
-    if (!confirm("Yakin hapus materi & modul terkait?")) return
-    if (fileUrl) { await supabase.storage.from("materi-files").remove([fileUrl.split("/").pop()]) }
-    await supabase.from("modul_ajar").delete().eq("materi_id", id)
+    if (!confirm("Yakin hapus materi ini?")) return
+    if (fileUrl) {
+      try {
+        var fileName = fileUrl.split("/").pop()
+        await supabase.storage.from("materi-files").remove([fileName])
+      } catch (err) { }
+    }
     await supabase.from("soal").delete().eq("materi_id", id)
     await supabase.from("materi").delete().eq("id", id)
     await loadMateri(user.id)
-    await loadModul(user.id)
-  }
-
-  function getLevelColor(level) {
-    var colors = { 1: "#3b82f6", 2: "#10b981", 3: "#f59e0b", 4: "#8b5cf6", 5: "#ec4899" }
-    return colors[level] || "#667eea"
+    setPesan("🗑️ Materi berhasil dihapus!")
   }
 
   var filteredMateri = filterTingkat === "semua" ? materiList : materiList.filter(function (m) { return m.tingkat === filterTingkat })
-  var filteredModul = filterTingkat === "semua" ? modulList : modulList.filter(function (m) { return m.tingkat === filterTingkat })
 
   if (loading) {
     return (<div style={st.center}><div style={st.spinner}></div><p style={{ marginTop: "16px", color: "#666" }}>Loading...</p></div>)
@@ -195,29 +210,35 @@ export default function GuruMateriPage() {
     <div style={st.container}>
       <div style={st.header}>
         <button onClick={function () { router.push("/dashboard") }} style={st.backBtn}>← Kembali</button>
-        <h1 style={st.title}>📚 Materi & Modul Ajar</h1>
-        <button onClick={function () { setShowForm(!showForm); setPesan("") }} style={st.addBtn}>
+        <h1 style={st.title}>📚 Materi Pembelajaran</h1>
+        <button onClick={function () {
+          if (showForm) { resetForm() }
+          setShowForm(!showForm)
+          setPesan("")
+        }} style={st.addBtn}>
           {showForm ? "✕ Tutup" : "+ Tambah Materi"}
         </button>
       </div>
 
       {pesan && (
-        <div style={{ ...st.pesan, background: pesan.startsWith("✅") || pesan.startsWith("🎉") ? "#dcfce7" : pesan.startsWith("⏳") ? "#fef3c7" : "#fee2e2", color: pesan.startsWith("✅") || pesan.startsWith("🎉") ? "#166534" : pesan.startsWith("⏳") ? "#92400e" : "#dc2626" }}>
+        <div style={{ ...st.pesan, background: pesan.startsWith("✅") || pesan.startsWith("🎉") || pesan.startsWith("🗑️") ? "#dcfce7" : "#fee2e2", color: pesan.startsWith("✅") || pesan.startsWith("🎉") || pesan.startsWith("🗑️") ? "#166534" : "#dc2626" }}>
           {pesan}
         </div>
       )}
 
       <div style={st.infoCard}>
         <p style={{ margin: 0, fontSize: "14px" }}>
-          🤖 <strong>Ihsan AI</strong> otomatis membuat Modul Ajar per tingkat kelas. Semua rombel dalam tingkat yang sama mendapat materi yang sama!
+          📝 Materi berlaku untuk semua rombel di tingkat yang sama. Contoh: kelas <strong>VII</strong> → berlaku untuk VII-A, VII-B, VII-C
         </p>
       </div>
 
       {/* FORM */}
       {showForm && (
         <div style={st.formCard}>
-          <h2 style={st.formTitle}>➕ Upload Materi + Generate Modul Ajar</h2>
-          <form onSubmit={handleUpload}>
+          <h2 style={st.formTitle}>
+            {editMode ? "✏️ Edit Materi" : "➕ Upload Materi Baru"}
+          </h2>
+          <form onSubmit={handleSubmit}>
             <p style={st.sectionLabel}>🏫 Tingkat Kelas</p>
             <div style={st.inputGroup}>
               <label style={st.label}>Pilih Tingkat Kelas *</label>
@@ -227,7 +248,7 @@ export default function GuruMateriPage() {
                   return <option key={t.tingkat} value={t.tingkat}>{t.jenjang} - Kelas {t.tingkat}</option>
                 })}
               </select>
-              <p style={st.hint}>Materi akan berlaku untuk semua rombel di tingkat ini (contoh: VII-A, VII-B, VII-C)</p>
+              <p style={st.hint}>Materi berlaku untuk semua rombel di tingkat ini</p>
             </div>
 
             <p style={st.sectionLabel}>📋 Data Sekolah</p>
@@ -269,24 +290,36 @@ export default function GuruMateriPage() {
             <div style={st.inputGroup}>
               <label style={st.label}>Pertemuan Ke-</label>
               <input type="number" min="1" value={pertemuanKe} onChange={function (e) { setPertemuanKe(Number(e.target.value)) }} style={{ ...st.input, width: "120px" }} />
-              <p style={st.hint}>🤖 Modul = Level {((pertemuanKe - 1) % 5) + 1}</p>
             </div>
             <div style={st.inputGroup}>
               <label style={st.label}>Judul Materi *</label>
               <input type="text" placeholder="Contoh: Konsep Bersuci (Thaharah)" value={judul} onChange={function (e) { setJudul(e.target.value) }} style={st.input} />
             </div>
             <div style={st.inputGroup}>
-              <label style={st.label}>Isi Materi *</label>
-              <textarea placeholder="Tulis penjelasan materi..." value={isi} onChange={function (e) { setIsi(e.target.value) }} style={st.textarea} rows={8} />
-            </div>
+  <label style={st.label}>Isi Materi *</label>
+  <RichEditor value={isi} onChange={setIsi} />
+</div>
             <div style={st.inputGroup}>
               <label style={st.label}>Upload File (Opsional)</label>
+              {fileLama && !file && (
+                <div style={st.fileLamaInfo}>
+                  📎 <a href={fileLama} target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6", fontWeight: "600" }}>File saat ini</a>
+                  <span style={{ marginLeft: "8px", color: "#6b7280", fontSize: "12px" }}>(Upload file baru untuk mengganti)</span>
+                </div>
+              )}
               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={function (e) { setFile(e.target.files[0]) }} style={st.fileInput} />
             </div>
 
-            <button type="submit" disabled={submitting || generatingAI} style={{ ...st.submitBtn, opacity: submitting || generatingAI ? 0.7 : 1 }}>
-              {generatingAI ? "🤖 Ihsan AI membuat Modul..." : submitting ? "⏳ Menyimpan..." : "💾 Simpan & Generate Modul"}
-            </button>
+            <div style={{ display: "flex", gap: "10px" }}>
+              {editMode && (
+                <button type="button" onClick={function () { resetForm(); setShowForm(false); setPesan("") }} style={st.cancelBtn}>
+                  ✕ Batal
+                </button>
+              )}
+              <button type="submit" disabled={submitting} style={{ ...st.submitBtn, opacity: submitting ? 0.7 : 1 }}>
+                {submitting ? "⏳ Menyimpan..." : editMode ? "💾 Update Materi" : "💾 Simpan Materi"}
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -295,123 +328,49 @@ export default function GuruMateriPage() {
       <div style={st.filterWrap}>
         <label style={{ fontSize: "14px", fontWeight: "600" }}>Filter Tingkat:</label>
         <select value={filterTingkat} onChange={function (e) { setFilterTingkat(e.target.value) }} style={st.filterSelect}>
-          <option value="semua">Semua Tingkat</option>
+          <option value="semua">Semua Tingkat ({materiList.length})</option>
           {tingkatList.map(function (t) {
-            return <option key={t.tingkat} value={t.tingkat}>{t.jenjang} - {t.tingkat}</option>
+            var count = materiList.filter(function (m) { return m.tingkat === t.tingkat }).length
+            return <option key={t.tingkat} value={t.tingkat}>{t.jenjang} - {t.tingkat} ({count})</option>
           })}
         </select>
       </div>
 
-      {/* TABS */}
-      <div style={st.tabWrap}>
-        <button onClick={function () { setTab("materi"); setViewModul(null) }} style={{ ...st.tabBtn, background: tab === "materi" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "materi" ? "white" : "#374151" }}>
-          📚 Materi ({filteredMateri.length})
-        </button>
-        <button onClick={function () { setTab("modul"); setViewModul(null) }} style={{ ...st.tabBtn, background: tab === "modul" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "modul" ? "white" : "#374151" }}>
-          📋 Modul Ajar ({filteredModul.length})
-        </button>
-      </div>
-
-      {/* TAB MATERI */}
-      {tab === "materi" && (
-        <div>
-          {filteredMateri.length === 0 ? (
-            <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada materi.</p></div>
-          ) : (
-            <div style={st.grid}>
-              {filteredMateri.map(function (item) {
-                var lvl = ((item.pertemuan_ke - 1) % 5) + 1
-                return (
-                  <div key={item.id} style={st.card}>
-                    <div style={st.cardTags}>
-                      <span style={st.tingkatBadge}>🏫 {item.tingkat}</span>
-                      <span style={st.pertemuanBadge}>Pertemuan {item.pertemuan_ke}</span>
-                      <span style={{ ...st.levelBadge, background: getLevelColor(lvl) }}>Level {lvl}</span>
-                    </div>
-                    <h3 style={st.cardJudul}>{item.judul}</h3>
-                    <p style={st.cardDate}>{new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
-                    <p style={st.cardIsi}>{item.isi.length > 80 ? item.isi.substring(0, 80) + "..." : item.isi}</p>
-                    {item.file_url && <a href={item.file_url} target="_blank" rel="noopener noreferrer" style={st.fileLink}>📎 File</a>}
-                    <button onClick={function () { handleHapus(item.id, item.file_url) }} style={st.hapusBtn}>🗑️ Hapus</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+      {/* DAFTAR MATERI */}
+      {filteredMateri.length === 0 ? (
+        <div style={st.empty}>
+          <p style={{ fontSize: "48px", margin: 0 }}>📭</p>
+          <p style={{ color: "#666", marginTop: "12px" }}>Belum ada materi.</p>
         </div>
-      )}
-
-      {/* TAB MODUL LIST */}
-      {tab === "modul" && !viewModul && (
-        <div>
-          {filteredModul.length === 0 ? (
-            <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada modul.</p></div>
-          ) : (
-            <div style={st.grid}>
-              {filteredModul.map(function (m) {
-                return (
-                  <div key={m.id} style={st.card} onClick={function () { setViewModul(m) }}>
-                    <div style={st.cardTags}>
-                      <span style={st.tingkatBadge}>🏫 {m.tingkat}</span>
-                      <span style={st.pertemuanBadge}>Pertemuan {m.pertemuan_ke}</span>
-                      <span style={{ ...st.levelBadge, background: getLevelColor(m.level_ke) }}>Level {m.level_ke}</span>
-                      <span style={st.aiBadge}>🤖 AI</span>
-                    </div>
-                    <h3 style={st.cardJudul}>{m.topik_pembahasan || m.mata_pelajaran}</h3>
-                    <p style={st.cardDate}>{m.satuan_pendidikan} • {m.kelas}</p>
-                    <p style={st.cardIsi}>{m.fokus_level}</p>
-                    <div style={st.viewBtn}>👁️ Lihat Modul</div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* VIEW MODUL DETAIL */}
-      {tab === "modul" && viewModul && (
-        <div style={st.modulView}>
-          <button onClick={function () { setViewModul(null) }} style={st.backModulBtn}>← Kembali ke Daftar</button>
-          <div style={st.modulHeader}><h2 style={st.modulTitle}>MODUL AJAR PERTEMUAN {viewModul.pertemuan_ke} (LEVEL {viewModul.level_ke})</h2></div>
-
-          <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>I. KOMPONEN INFORMASI UMUM</h3>
-            <table style={st.infoTable}><tbody>
-              <tr><td style={st.tdLabel}>Nama Penyusun / Satuan Pendidikan</td><td style={st.tdValue}>{viewModul.nama_penyusun} / {viewModul.satuan_pendidikan}</td></tr>
-              <tr><td style={st.tdLabel}>Mata Pelajaran / Fase / Jenjang</td><td style={st.tdValue}>{viewModul.mata_pelajaran} / {viewModul.fase} / {viewModul.jenjang}</td></tr>
-              <tr><td style={st.tdLabel}>Kelas / Semester / Alokasi Waktu</td><td style={st.tdValue}>{viewModul.kelas} / {viewModul.semester} / {viewModul.alokasi_waktu}</td></tr>
-              <tr><td style={st.tdLabel}>Tingkat / Rombel</td><td style={st.tdValue}>{viewModul.tingkat} (Semua Rombel)</td></tr>
-              <tr><td style={st.tdLabel}>Topik</td><td style={st.tdValue}>{viewModul.topik_pembahasan}</td></tr>
-              <tr><td style={st.tdLabel}>Profil Pelajar</td><td style={st.tdValue}>{viewModul.profil_pelajar}</td></tr>
-            </tbody></table>
-          </div>
-
-          <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>II. KOMPONEN INTI & TUJUAN PEMBELAJARAN</h3>
-            <div style={st.modulBlock}><p style={st.modulBlockLabel}>1. Tujuan Pembelajaran:</p><p style={st.modulBlockText}>{viewModul.tujuan_pembelajaran}</p></div>
-            <div style={st.modulBlock}><p style={st.modulBlockLabel}>2. Media & Alat Belajar:</p><p style={st.modulBlockText}><strong>Media Digital:</strong> {viewModul.media_digital}</p><p style={st.modulBlockText}><strong>Media Konkret:</strong> {viewModul.media_konkret}</p></div>
-          </div>
-
-          <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>III. SKENARIO PEMBELAJARAN (LEVEL {viewModul.level_ke})</h3>
-            <p style={st.modulFokus}>{viewModul.fokus_level}</p>
-            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Pendahuluan (15 Menit)</h4><p style={st.skenarioText}>{viewModul.pendahuluan}</p></div>
-            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Aktivitas Inti (60 Menit)</h4><p style={st.skenarioText}>{viewModul.aktivitas_inti}</p></div>
-            <div style={st.skenarioCard}><h4 style={st.skenarioTitle}>📌 Penutup (15 Menit)</h4><p style={st.skenarioText}>{viewModul.penutup}</p></div>
-            <div style={st.refleksiCard}><h4 style={{ margin: "0 0 8px 0", fontSize: "14px" }}>🪞 Refleksi:</h4><p style={{ margin: 0, fontSize: "14px", fontStyle: "italic", lineHeight: "1.6" }}>{viewModul.refleksi}</p></div>
-          </div>
-
-          <div style={st.modulSection}>
-            <h3 style={st.modulSectionTitle}>IV. ASESMEN & RUBRIK PENILAIAN</h3>
-            <table style={st.asesmenTable}>
-              <thead><tr><th style={st.th}>Aspek</th><th style={st.th}>Skor 1-2 (Dasar)</th><th style={st.th}>Skor 3-4 (Mahir)</th><th style={st.th}>Bobot</th></tr></thead>
-              <tbody>
-                <tr><td style={st.td}>{viewModul.asesmen_aspek1_nama}</td><td style={st.td}>{viewModul.asesmen_aspek1_dasar}</td><td style={st.td}>{viewModul.asesmen_aspek1_mahir}</td><td style={st.tdCenter}>{viewModul.asesmen_aspek1_bobot}</td></tr>
-                <tr><td style={st.td}>{viewModul.asesmen_aspek2_nama}</td><td style={st.td}>{viewModul.asesmen_aspek2_dasar}</td><td style={st.td}>{viewModul.asesmen_aspek2_mahir}</td><td style={st.tdCenter}>{viewModul.asesmen_aspek2_bobot}</td></tr>
-              </tbody>
-            </table>
-          </div>
+      ) : (
+        <div style={st.grid}>
+          {filteredMateri.map(function (item) {
+            return (
+              <div key={item.id} style={st.card}>
+                <div style={st.cardTags}>
+                  <span style={st.tingkatBadge}>🏫 {item.tingkat}</span>
+                  <span style={st.pertemuanBadge}>Pertemuan {item.pertemuan_ke}</span>
+                </div>
+                <h3 style={st.cardJudul}>{item.judul}</h3>
+                <p style={st.cardDate}>{new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
+                <p style={st.cardMapel}>📚 {item.mata_pelajaran} • {item.semester}</p>
+                <p style={st.cardIsi}>{item.isi.length > 100 ? item.isi.substring(0, 100) + "..." : item.isi}</p>
+                {item.file_url && (
+                  <a href={item.file_url} target="_blank" rel="noopener noreferrer" style={st.fileLink}>
+                    📎 Lihat File
+                  </a>
+                )}
+                <div style={st.actionRow}>
+                  <button onClick={function () { handleEdit(item) }} style={st.editBtn}>
+                    ✏️ Edit
+                  </button>
+                  <button onClick={function () { handleHapus(item.id, item.file_url) }} style={st.hapusBtn}>
+                    🗑️ Hapus
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -438,45 +397,24 @@ var st = {
   select: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", background: "white" },
   textarea: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
   fileInput: { width: "100%", padding: "10px", border: "2px dashed #d1d5db", borderRadius: "8px", boxSizing: "border-box" },
+  fileLamaInfo: { padding: "10px 14px", background: "#eff6ff", borderRadius: "8px", marginBottom: "8px", fontSize: "13px" },
   hint: { margin: "4px 0 0 0", fontSize: "12px", color: "#6b7280", fontStyle: "italic" },
-  submitBtn: { width: "100%", padding: "14px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "16px", fontWeight: "700" },
+  submitBtn: { flex: 1, padding: "14px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "16px", fontWeight: "700" },
+  cancelBtn: { padding: "14px 24px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "14px", fontWeight: "600" },
   filterWrap: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px", background: "white", padding: "12px 16px", borderRadius: "10px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   filterSelect: { padding: "8px 12px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", background: "white" },
-  tabWrap: { display: "flex", gap: "10px", marginBottom: "20px", flexWrap: "wrap" },
-  tabBtn: { padding: "12px 24px", borderRadius: "10px", border: "2px solid #e5e7eb", cursor: "pointer", fontWeight: "600", fontSize: "14px" },
   empty: { textAlign: "center", background: "white", padding: "48px", borderRadius: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" },
-  card: { background: "white", padding: "20px", borderRadius: "14px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", cursor: "pointer" },
+  card: { background: "white", padding: "20px", borderRadius: "14px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   cardTags: { display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" },
   tingkatBadge: { padding: "3px 10px", background: "#fef3c7", color: "#92400e", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
   pertemuanBadge: { padding: "3px 10px", background: "#dbeafe", color: "#1e40af", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
-  levelBadge: { padding: "3px 10px", color: "white", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
-  aiBadge: { padding: "3px 10px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", borderRadius: "16px", fontSize: "11px", fontWeight: "700" },
-  cardJudul: { margin: "0 0 4px 0", fontSize: "15px", color: "#1a1a1a" },
-  cardDate: { margin: "0 0 8px 0", fontSize: "12px", color: "#9ca3af" },
+  cardJudul: { margin: "0 0 4px 0", fontSize: "16px", color: "#1a1a1a" },
+  cardDate: { margin: "0 0 4px 0", fontSize: "12px", color: "#9ca3af" },
+  cardMapel: { margin: "0 0 8px 0", fontSize: "12px", color: "#667eea", fontWeight: "600" },
   cardIsi: { margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563", lineHeight: "1.5" },
-  fileLink: { display: "inline-block", marginBottom: "8px", color: "#3b82f6", fontSize: "13px", fontWeight: "600", textDecoration: "none" },
-  hapusBtn: { display: "block", width: "100%", padding: "8px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", fontSize: "13px" },
-  viewBtn: { padding: "8px 14px", background: "#eef2ff", color: "#667eea", borderRadius: "8px", textAlign: "center", fontWeight: "600", fontSize: "13px" },
-  modulView: { background: "white", padding: "32px", borderRadius: "16px", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" },
-  backModulBtn: { padding: "8px 16px", background: "#f3f4f6", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", marginBottom: "20px", color: "#374151" },
-  modulHeader: { textAlign: "center", marginBottom: "28px", borderBottom: "3px solid #667eea", paddingBottom: "16px" },
-  modulTitle: { margin: 0, fontSize: "22px", color: "#1a1a1a" },
-  modulSection: { marginBottom: "28px" },
-  modulSectionTitle: { margin: "0 0 16px 0", fontSize: "18px", color: "#1e40af", borderBottom: "2px solid #dbeafe", paddingBottom: "8px" },
-  infoTable: { width: "100%", borderCollapse: "collapse" },
-  tdLabel: { padding: "10px 14px", background: "#f9fafb", fontWeight: "600", fontSize: "13px", color: "#374151", border: "1px solid #e5e7eb", width: "35%" },
-  tdValue: { padding: "10px 14px", fontSize: "13px", color: "#1a1a1a", border: "1px solid #e5e7eb", lineHeight: "1.5" },
-  modulBlock: { marginBottom: "16px" },
-  modulBlockLabel: { margin: "0 0 6px 0", fontWeight: "700", fontSize: "14px", color: "#374151" },
-  modulBlockText: { margin: "0 0 8px 0", fontSize: "14px", color: "#4b5563", lineHeight: "1.6" },
-  modulFokus: { padding: "12px 16px", background: "#f0f4ff", borderRadius: "8px", marginBottom: "16px", fontSize: "14px", color: "#1e40af", fontWeight: "600", fontStyle: "italic", border: "1px solid #e0e7ff" },
-  skenarioCard: { padding: "16px 20px", background: "#f9fafb", borderRadius: "10px", marginBottom: "12px", border: "1px solid #e5e7eb" },
-  skenarioTitle: { margin: "0 0 10px 0", fontSize: "15px", color: "#1e40af" },
-  skenarioText: { margin: 0, fontSize: "14px", color: "#374151", lineHeight: "1.7", whiteSpace: "pre-wrap" },
-  refleksiCard: { padding: "16px 20px", background: "#fef3c7", borderRadius: "10px", border: "1px solid #fde68a" },
-  asesmenTable: { width: "100%", borderCollapse: "collapse" },
-  th: { padding: "12px 14px", background: "#667eea", color: "white", fontSize: "13px", fontWeight: "700", border: "1px solid #5b72d4", textAlign: "left" },
-  td: { padding: "10px 14px", fontSize: "13px", color: "#374151", border: "1px solid #e5e7eb", lineHeight: "1.5", verticalAlign: "top" },
-  tdCenter: { padding: "10px 14px", fontSize: "14px", color: "#374151", border: "1px solid #e5e7eb", textAlign: "center", fontWeight: "700" },
+  fileLink: { display: "inline-block", marginBottom: "12px", color: "#3b82f6", fontSize: "13px", fontWeight: "600", textDecoration: "none" },
+  actionRow: { display: "flex", gap: "8px" },
+  editBtn: { flex: 1, padding: "8px", background: "#dbeafe", color: "#1e40af", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", fontSize: "13px" },
+  hapusBtn: { flex: 1, padding: "8px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", fontSize: "13px" },
 }
