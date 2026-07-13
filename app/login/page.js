@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from "../../lib/supabaseClient"
 import { useRouter } from "next/navigation"
 
@@ -9,7 +9,35 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [pesan, setPesan] = useState("")
+  const [logoUrl, setLogoUrl] = useState("")
+  const [namaApp, setNamaApp] = useState("App Pembelajaran")
   const router = useRouter()
+
+  useEffect(function () {
+    loadSettings()
+  }, [])
+
+  async function loadSettings() {
+    var logoResult = await supabase
+      .from("app_settings")
+      .select("setting_value")
+      .eq("setting_key", "logo_url")
+      .single()
+
+    if (logoResult.data && logoResult.data.setting_value) {
+      setLogoUrl(logoResult.data.setting_value)
+    }
+
+    var namaResult = await supabase
+      .from("app_settings")
+      .select("setting_value")
+      .eq("setting_key", "nama_aplikasi")
+      .single()
+
+    if (namaResult.data && namaResult.data.setting_value) {
+      setNamaApp(namaResult.data.setting_value)
+    }
+  }
 
   async function handleLogin(e) {
     e.preventDefault()
@@ -22,29 +50,31 @@ export default function LoginPage() {
     setLoading(true)
     setPesan("")
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    var authResult = await supabase.auth.signInWithPassword({
+      email: email,
+      password: password,
     })
 
-    if (authError) {
-      setPesan("❌ Login gagal: " + authError.message)
+    if (authResult.error) {
+      setPesan("❌ Login gagal: " + authResult.error.message)
       setLoading(false)
       return
     }
 
-    const { data: userData, error: userError } = await supabase
+    var userResult = await supabase
       .from("users")
       .select("*")
-      .eq("id", authData.user.id)
+      .eq("id", authResult.data.user.id)
       .single()
 
-    if (userError || !userData) {
+    if (userResult.error || !userResult.data) {
       setPesan("❌ Data user tidak ditemukan")
       await supabase.auth.signOut()
       setLoading(false)
       return
     }
+
+    var userData = userResult.data
 
     if (userData.role === "siswa" && userData.status === "pending") {
       setPesan("⏳ Akun kamu belum disetujui guru.")
@@ -89,17 +119,21 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.headerWrap}>
-          <p style={{ fontSize: "48px", margin: 0 }}>📚</p>
-          <h1 style={styles.title}>Login</h1>
-          <p style={styles.subtitle}>Masuk ke App Pembelajaran</p>
+    <div style={st.container}>
+      <div style={st.card}>
+        <div style={st.headerWrap}>
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo" style={st.logoImg} />
+          ) : (
+            <p style={{ fontSize: "48px", margin: 0 }}>📚</p>
+          )}
+          <h1 style={st.title}>Login</h1>
+          <p style={st.subtitle}>{namaApp}</p>
         </div>
 
         {pesan && (
           <div style={{
-            ...styles.pesan,
+            ...st.pesan,
             background: pesan.startsWith("✅") ? "#dcfce7"
               : pesan.startsWith("⏳") ? "#fef3c7"
               : "#fee2e2",
@@ -112,41 +146,41 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleLogin}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
+          <div style={st.formGroup}>
+            <label style={st.label}>Email</label>
             <input
               type="email"
               placeholder="Masukkan email"
               value={email}
               onChange={function (e) { setEmail(e.target.value) }}
-              style={styles.input}
+              style={st.input}
             />
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Password</label>
+          <div style={st.formGroup}>
+            <label style={st.label}>Password</label>
             <input
               type="password"
               placeholder="Masukkan password"
               value={password}
               onChange={function (e) { setPassword(e.target.value) }}
-              style={styles.input}
+              style={st.input}
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            style={{ ...styles.submitBtn, opacity: loading ? 0.7 : 1 }}
+            style={{ ...st.submitBtn, opacity: loading ? 0.7 : 1 }}
           >
             {loading ? "⏳ Masuk..." : "🔑 Login"}
           </button>
         </form>
 
-        <div style={styles.linkWrap}>
+        <div style={st.linkWrap}>
           <p style={{ margin: 0, color: "#6b7280", fontSize: "14px" }}>
             Belum punya akun?{" "}
-            <span onClick={function () { router.push("/register") }} style={styles.link}>
+            <span onClick={function () { router.push("/register") }} style={st.link}>
               Daftar di sini
             </span>
           </p>
@@ -156,7 +190,7 @@ export default function LoginPage() {
   )
 }
 
-var styles = {
+var st = {
   container: {
     minHeight: "100vh",
     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -178,15 +212,23 @@ var styles = {
     textAlign: "center",
     marginBottom: "28px",
   },
+  logoImg: {
+    width: "72px",
+    height: "72px",
+    borderRadius: "16px",
+    objectFit: "cover",
+    marginBottom: "8px",
+  },
   title: {
-    margin: "12px 0 8px 0",
+    margin: "12px 0 4px 0",
     fontSize: "26px",
     color: "#1a1a1a",
   },
   subtitle: {
     margin: 0,
-    fontSize: "14px",
-    color: "#6b7280",
+    fontSize: "15px",
+    color: "#667eea",
+    fontWeight: "600",
   },
   pesan: {
     padding: "12px 16px",
