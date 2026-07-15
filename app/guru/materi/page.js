@@ -115,7 +115,7 @@ export default function GuruMateriPage() {
     setFile(null)
     setPertemuanKe(item.pertemuan_ke || 1)
     setTingkat(item.tingkat || "")
-    setNamaPenyusun(item.nama_penyusun || "")
+    setNamaPenyusun(item.nama_penyusun || (user ? user.nama : ""))
     setSatuanPendidikan(item.satuan_pendidikan || "")
     setMataPelajaran(item.mata_pelajaran || "")
     setFase(item.fase || "")
@@ -296,9 +296,9 @@ export default function GuruMateriPage() {
               <input type="text" placeholder="Contoh: Konsep Bersuci (Thaharah)" value={judul} onChange={function (e) { setJudul(e.target.value) }} style={st.input} />
             </div>
             <div style={st.inputGroup}>
-  <label style={st.label}>Isi Materi *</label>
-  <RichEditor value={isi} onChange={setIsi} />
-</div>
+              <label style={st.label}>Isi Materi *</label>
+              <RichEditor value={isi} onChange={setIsi} />
+            </div>
             <div style={st.inputGroup}>
               <label style={st.label}>Upload File (Opsional)</label>
               {fileLama && !file && (
@@ -354,7 +354,9 @@ export default function GuruMateriPage() {
                 <h3 style={st.cardJudul}>{item.judul}</h3>
                 <p style={st.cardDate}>{new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
                 <p style={st.cardMapel}>📚 {item.mata_pelajaran} • {item.semester}</p>
-                <p style={st.cardIsi}>{item.isi.length > 100 ? item.isi.substring(0, 100) + "..." : item.isi}</p>
+                <div style={st.cardIsi} dangerouslySetInnerHTML={{
+                  __html: item.isi && item.isi.length > 200 ? item.isi.substring(0, 200) + "..." : (item.isi || "")
+                }}></div>
                 {item.file_url && (
                   <a href={item.file_url} target="_blank" rel="noopener noreferrer" style={st.fileLink}>
                     📎 Lihat File
@@ -395,7 +397,6 @@ var st = {
   label: { display: "block", marginBottom: "6px", fontWeight: "600", fontSize: "13px", color: "#374151" },
   input: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box" },
   select: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", background: "white" },
-  textarea: { width: "100%", padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
   fileInput: { width: "100%", padding: "10px", border: "2px dashed #d1d5db", borderRadius: "8px", boxSizing: "border-box" },
   fileLamaInfo: { padding: "10px 14px", background: "#eff6ff", borderRadius: "8px", marginBottom: "8px", fontSize: "13px" },
   hint: { margin: "4px 0 0 0", fontSize: "12px", color: "#6b7280", fontStyle: "italic" },
@@ -412,7 +413,7 @@ var st = {
   cardJudul: { margin: "0 0 4px 0", fontSize: "16px", color: "#1a1a1a" },
   cardDate: { margin: "0 0 4px 0", fontSize: "12px", color: "#9ca3af" },
   cardMapel: { margin: "0 0 8px 0", fontSize: "12px", color: "#667eea", fontWeight: "600" },
-  cardIsi: { margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563", lineHeight: "1.5" },
+  cardIsi: { margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563", lineHeight: "1.5", maxHeight: "120px", overflow: "hidden" },
   fileLink: { display: "inline-block", marginBottom: "12px", color: "#3b82f6", fontSize: "13px", fontWeight: "600", textDecoration: "none" },
   actionRow: { display: "flex", gap: "8px" },
   editBtn: { flex: 1, padding: "8px", background: "#dbeafe", color: "#1e40af", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", fontSize: "13px" },
