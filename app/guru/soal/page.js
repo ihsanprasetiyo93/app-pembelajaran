@@ -10,14 +10,22 @@ export default function GuruSoalPage() {
   const [soalList, setSoalList] = useState([])
   const [loading, setLoading] = useState(true)
   const [pesan, setPesan] = useState("")
-  const [tab, setTab] = useState("daftar")
+  const [tab, setTab] = useState("manual")
+  const [submitting, setSubmitting] = useState(false)
   const router = useRouter()
 
+  // Form manual
   const [materiId, setMateriId] = useState("")
-  const [teksSoal, setTeksSoal] = useState("")
-  const [previewSoal, setPreviewSoal] = useState(null)
-  const [saving, setSaving] = useState(false)
+  const [jenisSoal, setJenisSoal] = useState("pg")
+  const [pertanyaan, setPertanyaan] = useState("")
+  const [pilihanA, setPilihanA] = useState("")
+  const [pilihanB, setPilihanB] = useState("")
+  const [pilihanC, setPilihanC] = useState("")
+  const [pilihanD, setPilihanD] = useState("")
+  const [jawabanBenar, setJawabanBenar] = useState("A")
+  const [kunciEssay, setKunciEssay] = useState("")
 
+  // Filter
   const [filterMateri, setFilterMateri] = useState("semua")
   const [filterJenis, setFilterJenis] = useState("semua")
   const [showKunci, setShowKunci] = useState({})
@@ -31,12 +39,10 @@ export default function GuruSoalPage() {
 
     var userResult = await supabase.from("users").select("*").eq("id", authUser.id).single()
     if (!userResult.data || userResult.data.role !== "guru") { router.push("/dashboard"); return }
-
     setUser(userResult.data)
 
     var materiResult = await supabase.from("materi").select("*").eq("guru_id", authUser.id).order("pertemuan_ke", { ascending: true })
     setMateriList(materiResult.data || [])
-
     if (materiResult.data && materiResult.data.length > 0) {
       setMateriId(String(materiResult.data[0].id))
     }
@@ -49,143 +55,63 @@ export default function GuruSoalPage() {
     if (!daftarMateri || daftarMateri.length === 0) { setSoalList([]); return }
     var ids = daftarMateri.map(function (m) { return m.id })
     var result = await supabase.from("soal").select("*").in("materi_id", ids).order("created_at", { ascending: false })
-    if (!result.error) setSoalList(result.data || [])
-  }
-
-  function getMateri(id) {
-    return materiList.find(function (item) { return String(item.id) === String(id) })
+    if (result.error) { console.log("Error:", result.error) }
+    else { setSoalList(result.data || []) }
   }
 
   function getMateriJudul(id) {
-    var m = getMateri(id)
-    return m ? m.judul : "Tidak ditemukan"
+    var m = materiList.find(function (item) { return String(item.id) === String(id) })
+    return m ? "P" + m.pertemuan_ke + " - " + m.judul : "Tidak ditemukan"
   }
 
-  // 🎯 PARSER SOAL - Convert text ke array soal
-  function parseSoal(text) {
-    if (!text || !text.trim()) return []
+  async function handleTambahManual(e) {
+    e.preventDefault()
 
-    var soalArray = []
-    // Split per blok (dipisah baris kosong)
-    var blocks = text.split(/\n\s*\n/).map(function (b) { return b.trim() }).filter(Boolean)
-
-    blocks.forEach(function (block) {
-      var lines = block.split("\n").map(function (l) { return l.trim() }).filter(Boolean)
-      if (lines.length === 0) return
-
-      // Ambil baris pertama = pertanyaan (buang nomor di depan)
-      var pertanyaan = lines[0].replace(/^\d+[\.\)]\s*/, "").trim()
-      if (!pertanyaan) return
-
-      // Cek apakah essay (ada baris JAWAB:)
-      var jawabLineIdx = lines.findIndex(function (l) { return /^JAWAB\s*:/i.test(l) })
-      var isEssay = jawabLineIdx > 0
-
-      if (isEssay) {
-        var kunciEssay = lines.slice(jawabLineIdx).join(" ").replace(/^JAWAB\s*:\s*/i, "").trim()
-        soalArray.push({
-          pertanyaan: pertanyaan,
-          jenis_soal: "essay",
-          kunci_essay: kunciEssay,
-          pilihan: null,
-          jawaban_benar: null,
-        })
-      } else {
-        // Pilihan Ganda
-        var pilihanObj = {}
-        var jawabanBenar = ""
-
-        for (var i = 1; i < lines.length; i++) {
-          var line = lines[i]
-          // Match: "A. isi" atau "A) isi"
-          var match = line.match(/^([A-E])[\.\)]\s*(.+)$/)
-          if (match) {
-            var huruf = match[1].toUpperCase()
-            var isi = match[2].trim()
-            // Cek tanda * di akhir = jawaban benar
-            if (isi.endsWith("*")) {
-              isi = isi.slice(0, -1).trim()
-              jawabanBenar = huruf
-            }
-            pilihanObj[huruf] = isi
-          }
-        }
-
-        if (Object.keys(pilihanObj).length >= 2) {
-          soalArray.push({
-            pertanyaan: pertanyaan,
-            jenis_soal: "pg",
-            pilihan: pilihanObj,
-            jawaban_benar: jawabanBenar || "A",
-            kunci_essay: null,
-          })
-        }
-      }
-    })
-
-    return soalArray
-  }
-
-  function handlePreview() {
     if (!materiId) { setPesan("❌ Pilih materi dulu!"); return }
-    if (!teksSoal.trim()) { setPesan("❌ Tulis soal dulu!"); return }
+    if (!pertanyaan) { setPesan("❌ Pertanyaan wajib diisi!"); return }
 
-    var hasil = parseSoal(teksSoal)
-
-    if (hasil.length === 0) {
-      setPesan("❌ Tidak ada soal terdeteksi. Cek format soal!")
-      setPreviewSoal(null)
-      return
-    }
-
-    // Cek soal tanpa jawaban benar (PG)
-    var noAnswer = hasil.filter(function (s) { return s.jenis_soal === "pg" && !s.jawaban_benar })
-    if (noAnswer.length > 0) {
-      setPesan("⚠️ Ada " + noAnswer.length + " soal PG belum ditandai jawaban benar (pakai tanda * di akhir). Default jawaban = A")
+    if (jenisSoal === "pg") {
+      if (!pilihanA || !pilihanB || !pilihanC || !pilihanD) {
+        setPesan("❌ Semua pilihan jawaban wajib diisi!")
+        return
+      }
     } else {
-      setPesan("✅ " + hasil.length + " soal berhasil di-parse! Cek preview, lalu simpan.")
+      if (!kunciEssay) { setPesan("❌ Kunci jawaban wajib diisi!"); return }
     }
 
-    setPreviewSoal(hasil)
-  }
-
-  async function handleSimpan() {
-    if (!previewSoal || previewSoal.length === 0) return
-
-    setSaving(true)
+    setSubmitting(true)
     setPesan("")
 
-    var mid = isNaN(Number(materiId)) ? materiId : Number(materiId)
-    var materi = getMateri(materiId)
-    var tingkat = materi ? (materi.tingkat || "") : ""
+    var dataInsert = {
+      pertanyaan: pertanyaan,
+      materi_id: isNaN(Number(materiId)) ? materiId : Number(materiId),
+      jenis_soal: jenisSoal,
+      is_auto_generated: false,
+    }
 
-    var soalToInsert = previewSoal.map(function (s) {
-      return {
-        pertanyaan: s.pertanyaan,
-        pilihan: s.pilihan,
-        jawaban_benar: s.jawaban_benar,
-        kunci_essay: s.kunci_essay,
-        materi_id: mid,
-        jenis_soal: s.jenis_soal,
-        is_auto_generated: false,
-        tingkat: tingkat,
-      }
-    })
+    if (jenisSoal === "pg") {
+      dataInsert.pilihan = { A: pilihanA, B: pilihanB, C: pilihanC, D: pilihanD }
+      dataInsert.jawaban_benar = jawabanBenar
+    } else {
+      dataInsert.kunci_essay = kunciEssay
+    }
 
-    var result = await supabase.from("soal").insert(soalToInsert)
+    var result = await supabase.from("soal").insert([dataInsert])
 
     if (result.error) {
       setPesan("❌ Gagal simpan: " + result.error.message)
     } else {
-      setPesan("🎉 " + soalToInsert.length + " soal berhasil disimpan!")
-      setPreviewSoal(null)
-      setTeksSoal("")
+      setPesan("✅ Soal berhasil ditambahkan!")
+      setPertanyaan(""); setPilihanA(""); setPilihanB("")
+      setPilihanC(""); setPilihanD(""); setJawabanBenar("A")
+      setKunciEssay("")
       await loadSoal(materiList)
     }
-    setSaving(false)
+
+    setSubmitting(false)
   }
 
-  async function handleHapusSoal(id) {
+  async function handleHapus(id) {
     if (!confirm("Yakin hapus soal ini?")) return
     await supabase.from("soal").delete().eq("id", id)
     await loadSoal(materiList)
@@ -193,59 +119,14 @@ export default function GuruSoalPage() {
 
   function toggleKunci(id) {
     setShowKunci(function (prev) {
-      var next = { ...prev }
-      next[id] = !next[id]
-      return next
+      return { ...prev, [id]: !prev[id] }
     })
   }
 
   function getPilihanObject(pilihan) {
     if (!pilihan) return {}
-    if (typeof pilihan === "object" && !Array.isArray(pilihan)) return pilihan
-    if (Array.isArray(pilihan)) {
-      var huruf = ["A", "B", "C", "D", "E"]
-      var obj = {}
-      pilihan.forEach(function (opsi, i) { if (i < huruf.length) obj[huruf[i]] = opsi })
-      return obj
-    }
+    if (typeof pilihan === "object") return pilihan
     try { return JSON.parse(pilihan) } catch (e) { return {} }
-  }
-
-  function loadTemplate(jenis) {
-    if (jenis === "pg") {
-      setTeksSoal(`1. Apa ibukota Indonesia?
-A. Bandung
-B. Jakarta*
-C. Surabaya
-D. Medan
-
-2. Berapa hasil 5 + 3?
-A. 6
-B. 7
-C. 8*
-D. 9`)
-    } else if (jenis === "essay") {
-      setTeksSoal(`1. Jelaskan pengertian demokrasi!
-JAWAB: Demokrasi adalah sistem pemerintahan dari rakyat, oleh rakyat, dan untuk rakyat.
-
-2. Sebutkan 3 rukun Islam!
-JAWAB: Syahadat, Sholat, Zakat`)
-    } else {
-      setTeksSoal(`1. Apa ibukota Indonesia?
-A. Bandung
-B. Jakarta*
-C. Surabaya
-D. Medan
-
-2. Jelaskan pengertian demokrasi!
-JAWAB: Demokrasi adalah sistem pemerintahan dari rakyat.
-
-3. Warna bendera Indonesia?
-A. Merah Putih*
-B. Putih Merah
-C. Hijau Putih
-D. Biru Putih`)
-    }
   }
 
   var filteredSoal = soalList.filter(function (s) {
@@ -254,7 +135,9 @@ D. Biru Putih`)
     return matchMateri && matchJenis
   })
 
-  if (loading) return (<div style={st.center}><div style={st.spinner}></div><p style={{ marginTop: "16px", color: "#666" }}>Loading...</p></div>)
+  if (loading) {
+    return (<div style={st.center}><div style={st.spinner}></div><p style={{ marginTop: "16px", color: "#666" }}>Loading...</p></div>)
+  }
 
   return (
     <div style={st.container}>
@@ -264,116 +147,129 @@ D. Biru Putih`)
       </div>
 
       {pesan && (
-        <div style={{ ...st.pesan, background: pesan.startsWith("✅") || pesan.startsWith("🎉") ? "#dcfce7" : pesan.startsWith("⚠️") ? "#fef3c7" : "#fee2e2", color: pesan.startsWith("✅") || pesan.startsWith("🎉") ? "#166534" : pesan.startsWith("⚠️") ? "#92400e" : "#dc2626" }}>
+        <div style={{ ...st.pesan, background: pesan.startsWith("✅") ? "#dcfce7" : "#fee2e2", color: pesan.startsWith("✅") ? "#166534" : "#dc2626" }}>
           {pesan}
         </div>
       )}
 
+      {/* Tab */}
       <div style={st.tabWrap}>
-        <button onClick={function () { setTab("buat") }} style={{ ...st.tabBtn, background: tab === "buat" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "buat" ? "white" : "#374151" }}>
-          📋 Buat Soal (Paste)
+        <button onClick={function () { setTab("manual") }} style={{ ...st.tabBtn, background: tab === "manual" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "manual" ? "white" : "#374151" }}>
+          ✍️ Buat Soal Manual
         </button>
         <button onClick={function () { setTab("daftar") }} style={{ ...st.tabBtn, background: tab === "daftar" ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: tab === "daftar" ? "white" : "#374151" }}>
-          📚 Daftar Soal ({soalList.length})
+          📋 Daftar Soal ({soalList.length})
         </button>
       </div>
 
-      {/* TAB BUAT SOAL */}
-      {tab === "buat" && (
+      {/* TAB MANUAL */}
+      {tab === "manual" && (
         <div style={st.card}>
-          <h2 style={st.cardTitle}>📋 Buat Soal (Copy-Paste)</h2>
+          <h2 style={st.cardTitle}>✍️ Buat Soal Manual</h2>
 
           {materiList.length === 0 ? (
-            <div style={st.emptySmall}><p>⚠️ Belum ada materi. Upload materi dulu!</p></div>
+            <div style={st.emptySmall}>⚠️ Belum ada materi. Upload materi dulu!</div>
           ) : (
-            <div>
+            <form onSubmit={handleTambahManual}>
               <div style={st.formGroup}>
                 <label style={st.label}>Pilih Materi *</label>
                 <select value={materiId} onChange={function (e) { setMateriId(e.target.value) }} style={st.select}>
                   {materiList.map(function (m) {
-                    return <option key={m.id} value={m.id}>Pertemuan {m.pertemuan_ke} - {m.judul}</option>
+                    return <option key={m.id} value={m.id}>P{m.pertemuan_ke} - {m.judul}</option>
                   })}
                 </select>
               </div>
 
-              <div style={st.templateBox}>
-                <p style={st.templateTitle}>📝 Format Penulisan Soal:</p>
-                <div style={st.templateContent}>
-                  <p style={{ margin: "0 0 8px 0", fontSize: "13px" }}><strong>PG:</strong> Beri tanda <code style={st.code}>*</code> pada jawaban benar</p>
-                  <p style={{ margin: "0 0 8px 0", fontSize: "13px" }}><strong>Essay:</strong> Diikuti <code style={st.code}>JAWAB:</code> untuk kunci jawaban</p>
-                  <p style={{ margin: "0 0 8px 0", fontSize: "13px" }}><strong>Antar soal:</strong> Pisahkan dengan <code style={st.code}>baris kosong</code></p>
-                </div>
-                <div style={st.templateBtnWrap}>
-                  <button onClick={function () { loadTemplate("pg") }} style={st.templateBtn}>📝 Contoh PG</button>
-                  <button onClick={function () { loadTemplate("essay") }} style={st.templateBtn}>✍️ Contoh Essay</button>
-                  <button onClick={function () { loadTemplate("campuran") }} style={st.templateBtn}>📋 Contoh Campuran</button>
+              <div style={st.formGroup}>
+                <label style={st.label}>Jenis Soal *</label>
+                <div style={st.jenisWrap}>
+                  <div onClick={function () { setJenisSoal("pg") }} style={{ ...st.jenisCard, border: jenisSoal === "pg" ? "2px solid #667eea" : "2px solid #e5e7eb", background: jenisSoal === "pg" ? "#eef2ff" : "white" }}>
+                    <p style={{ margin: 0, fontWeight: "700", fontSize: "14px" }}>📝 Pilihan Ganda</p>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#6b7280" }}>A, B, C, D + kunci</p>
+                  </div>
+                  <div onClick={function () { setJenisSoal("essay") }} style={{ ...st.jenisCard, border: jenisSoal === "essay" ? "2px solid #667eea" : "2px solid #e5e7eb", background: jenisSoal === "essay" ? "#eef2ff" : "white" }}>
+                    <p style={{ margin: 0, fontWeight: "700", fontSize: "14px" }}>✍️ Essay</p>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#6b7280" }}>Uraian + panduan jawaban</p>
+                  </div>
                 </div>
               </div>
 
               <div style={st.formGroup}>
-                <label style={st.label}>Ketik / Paste Soal di Sini *</label>
+                <label style={st.label}>Pertanyaan *</label>
                 <textarea
-                  value={teksSoal}
-                  onChange={function (e) { setTeksSoal(e.target.value) }}
-                  placeholder={"1. Apa ibukota Indonesia?\nA. Bandung\nB. Jakarta*\nC. Surabaya\nD. Medan\n\n2. Jelaskan demokrasi!\nJAWAB: Sistem pemerintahan dari rakyat."}
-                  style={st.textareaBig}
-                  rows={15}
+                  value={pertanyaan}
+                  onChange={function (e) { setPertanyaan(e.target.value) }}
+                  placeholder="Tulis pertanyaan di sini..."
+                  style={st.textarea}
+                  rows={3}
                 />
               </div>
 
-              <button onClick={handlePreview} style={st.submitBtn}>👀 Preview Soal</button>
-            </div>
-          )}
-
-          {previewSoal && previewSoal.length > 0 && (
-            <div style={st.previewWrap}>
-              <h3 style={st.previewTitle}>👀 Preview ({previewSoal.length} soal)</h3>
-              {previewSoal.map(function (s, i) {
-                var isEssay = s.jenis_soal === "essay"
-                return (
-                  <div key={i} style={st.previewCard}>
-                    <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                      <span style={{ padding: "2px 10px", background: isEssay ? "#fef3c7" : "#dbeafe", color: isEssay ? "#92400e" : "#1e40af", borderRadius: "6px", fontSize: "11px", fontWeight: "700" }}>
-                        {isEssay ? "✍️ Essay" : "📝 PG"}
-                      </span>
-                    </div>
-                    <p style={st.previewQ}><strong>{i + 1}.</strong> {s.pertanyaan}</p>
-
-                    {!isEssay && s.pilihan && (
-                      <div>
-                        {Object.entries(s.pilihan).map(function (entry) {
-                          var isBenar = entry[0] === s.jawaban_benar
-                          return (
-                            <p key={entry[0]} style={{ ...st.previewOption, background: isBenar ? "#dcfce7" : "#f9fafb", fontWeight: isBenar ? "700" : "400" }}>
-                              {entry[0]}. {entry[1]} {isBenar ? " ✅" : ""}
-                            </p>
-                          )
-                        })}
-                      </div>
-                    )}
-
-                    {isEssay && s.kunci_essay && (
-                      <div style={st.kunciBox}>
-                        <p style={{ margin: 0, fontSize: "12px", color: "#667eea", fontWeight: "700" }}>🔑 Kunci Jawaban:</p>
-                        <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#374151" }}>{s.kunci_essay}</p>
-                      </div>
-                    )}
+              {jenisSoal === "pg" && (
+                <>
+                  <div style={st.formGroup}>
+                    <label style={st.label}>Pilihan Jawaban *</label>
+                    {[
+                      { key: "A", value: pilihanA, setter: setPilihanA },
+                      { key: "B", value: pilihanB, setter: setPilihanB },
+                      { key: "C", value: pilihanC, setter: setPilihanC },
+                      { key: "D", value: pilihanD, setter: setPilihanD },
+                    ].map(function (p) {
+                      return (
+                        <div key={p.key} style={st.pilihanRow}>
+                          <span style={{ ...st.pilihanKey, background: jawabanBenar === p.key ? "#667eea" : "#9ca3af" }}>
+                            {p.key}
+                          </span>
+                          <input
+                            type="text"
+                            placeholder={"Pilihan " + p.key}
+                            value={p.value}
+                            onChange={function (e) { p.setter(e.target.value) }}
+                            style={st.pilihanInput}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
 
-              <div style={st.previewActions}>
-                <button onClick={function () { setPreviewSoal(null) }} style={st.retryBtn}>🔄 Edit Ulang</button>
-                <button onClick={handleSimpan} disabled={saving} style={{ ...st.saveBtn, opacity: saving ? 0.7 : 1 }}>
-                  {saving ? "⏳ Menyimpan..." : "💾 Simpan Semua Soal"}
-                </button>
-              </div>
-            </div>
+                  <div style={st.formGroup}>
+                    <label style={st.label}>Jawaban Benar *</label>
+                    <div style={st.jawabanWrap}>
+                      {["A", "B", "C", "D"].map(function (j) {
+                        return (
+                          <button key={j} type="button" onClick={function () { setJawabanBenar(j) }}
+                            style={{ ...st.jawabanBtn, background: jawabanBenar === j ? "linear-gradient(135deg, #667eea, #764ba2)" : "white", color: jawabanBenar === j ? "white" : "#374151", border: jawabanBenar === j ? "2px solid #667eea" : "2px solid #e5e7eb" }}>
+                            {j}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {jenisSoal === "essay" && (
+                <div style={st.formGroup}>
+                  <label style={st.label}>🔑 Kunci Jawaban (hanya guru yang lihat) *</label>
+                  <textarea
+                    value={kunciEssay}
+                    onChange={function (e) { setKunciEssay(e.target.value) }}
+                    placeholder="Tulis panduan/kunci jawaban essay..."
+                    style={{ ...st.textarea, background: "#fef3c7" }}
+                    rows={4}
+                  />
+                </div>
+              )}
+
+              <button type="submit" disabled={submitting} style={{ ...st.submitBtn, opacity: submitting ? 0.7 : 1 }}>
+                {submitting ? "⏳ Menyimpan..." : "💾 Simpan Soal"}
+              </button>
+            </form>
           )}
         </div>
       )}
 
-      {/* TAB DAFTAR SOAL */}
+      {/* TAB DAFTAR */}
       {tab === "daftar" && (
         <div>
           <div style={st.filterWrap}>
@@ -382,7 +278,7 @@ D. Biru Putih`)
               <select value={filterMateri} onChange={function (e) { setFilterMateri(e.target.value) }} style={st.filterSelect}>
                 <option value="semua">Semua</option>
                 {materiList.map(function (m) {
-                  return <option key={m.id} value={String(m.id)}>{m.judul}</option>
+                  return <option key={m.id} value={String(m.id)}>P{m.pertemuan_ke} - {m.judul}</option>
                 })}
               </select>
             </div>
@@ -397,12 +293,16 @@ D. Biru Putih`)
           </div>
 
           {filteredSoal.length === 0 ? (
-            <div style={st.empty}><p style={{ fontSize: "48px", margin: 0 }}>📭</p><p style={{ color: "#666", marginTop: "12px" }}>Belum ada soal.</p></div>
+            <div style={st.empty}>
+              <p style={{ fontSize: "48px", margin: 0 }}>📭</p>
+              <p style={{ color: "#666", marginTop: "12px" }}>Belum ada soal.</p>
+            </div>
           ) : (
             <div style={st.listWrap}>
               {filteredSoal.map(function (item, index) {
                 var pil = getPilihanObject(item.pilihan)
                 var isEssay = (item.jenis_soal || "pg") === "essay"
+
                 return (
                   <div key={item.id} style={st.soalCard}>
                     <div style={st.soalTop}>
@@ -422,10 +322,10 @@ D. Biru Putih`)
                       <div style={st.pilihanList}>
                         {Object.entries(pil).map(function (entry) {
                           return (
-                            <div key={entry[0]} style={{ ...st.pilihanRow, background: item.jawaban_benar === entry[0] ? "#dcfce7" : "#f9fafb", border: item.jawaban_benar === entry[0] ? "1px solid #86efac" : "1px solid #e5e7eb" }}>
-                              <span style={{ ...st.pilihanKey, background: item.jawaban_benar === entry[0] ? "#16a34a" : "#9ca3af" }}>{entry[0]}</span>
+                            <div key={entry[0]} style={{ ...st.pilihanItem, background: item.jawaban_benar === entry[0] ? "#dcfce7" : "#f9fafb", border: item.jawaban_benar === entry[0] ? "1px solid #86efac" : "1px solid #e5e7eb" }}>
+                              <span style={{ ...st.pilihanKeyShow, background: item.jawaban_benar === entry[0] ? "#16a34a" : "#9ca3af" }}>{entry[0]}</span>
                               <span style={{ fontSize: "14px" }}>{entry[1]}</span>
-                              {item.jawaban_benar === entry[0] && (<span style={st.benarText}>✅ Jawaban</span>)}
+                              {item.jawaban_benar === entry[0] && <span style={st.benarText}>✅ Jawaban</span>}
                             </div>
                           )
                         })}
@@ -445,7 +345,7 @@ D. Biru Putih`)
                       </div>
                     )}
 
-                    <button onClick={function () { handleHapusSoal(item.id) }} style={st.hapusBtn}>🗑️ Hapus</button>
+                    <button onClick={function () { handleHapus(item.id) }} style={st.hapusBtn}>🗑️ Hapus</button>
                   </div>
                 )
               })}
@@ -473,23 +373,15 @@ var st = {
   formGroup: { marginBottom: "20px" },
   label: { display: "block", marginBottom: "8px", fontWeight: "600", fontSize: "14px", color: "#374151" },
   select: { width: "100%", padding: "12px 16px", border: "2px solid #e5e7eb", borderRadius: "10px", fontSize: "14px", outline: "none", boxSizing: "border-box", background: "white" },
-  textareaBig: { width: "100%", padding: "14px", border: "2px solid #e5e7eb", borderRadius: "10px", fontSize: "14px", outline: "none", boxSizing: "border-box", fontFamily: "'Courier New', monospace", resize: "vertical" },
-  templateBox: { padding: "16px 20px", background: "#eff6ff", borderRadius: "12px", marginBottom: "20px", border: "1px solid #bfdbfe" },
-  templateTitle: { margin: "0 0 8px 0", fontSize: "14px", fontWeight: "700", color: "#1e40af" },
-  templateContent: { marginBottom: "12px" },
-  code: { padding: "2px 6px", background: "#1e40af", color: "white", borderRadius: "4px", fontSize: "11px", fontFamily: "monospace" },
-  templateBtnWrap: { display: "flex", gap: "8px", flexWrap: "wrap" },
-  templateBtn: { padding: "6px 12px", background: "white", color: "#1e40af", border: "1px solid #bfdbfe", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600" },
+  textarea: { width: "100%", padding: "12px 16px", border: "2px solid #e5e7eb", borderRadius: "10px", fontSize: "14px", outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" },
+  jenisWrap: { display: "flex", gap: "10px", flexWrap: "wrap" },
+  jenisCard: { padding: "14px 18px", borderRadius: "12px", cursor: "pointer", flex: 1, minWidth: "140px" },
+  pilihanRow: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" },
+  pilihanKey: { width: "36px", height: "36px", borderRadius: "8px", color: "white", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "700", fontSize: "14px", flexShrink: 0 },
+  pilihanInput: { flex: 1, padding: "10px 14px", border: "2px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", outline: "none" },
+  jawabanWrap: { display: "flex", gap: "10px" },
+  jawabanBtn: { width: "50px", height: "50px", borderRadius: "10px", cursor: "pointer", fontWeight: "700", fontSize: "18px" },
   submitBtn: { width: "100%", padding: "14px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "16px", fontWeight: "700" },
-  previewWrap: { marginTop: "24px", borderTop: "2px solid #e5e7eb", paddingTop: "24px" },
-  previewTitle: { margin: "0 0 16px 0", fontSize: "18px" },
-  previewCard: { padding: "16px", background: "#f9fafb", borderRadius: "10px", marginBottom: "12px", border: "1px solid #e5e7eb" },
-  previewQ: { margin: "0 0 10px 0", fontSize: "15px", lineHeight: "1.5", color: "#1a1a1a" },
-  previewOption: { margin: "0 0 6px 0", padding: "8px 12px", borderRadius: "6px", fontSize: "14px" },
-  kunciBox: { padding: "12px 16px", background: "#fef3c7", borderRadius: "8px", marginTop: "8px", border: "1px solid #fde68a" },
-  previewActions: { display: "flex", gap: "10px", marginTop: "20px", justifyContent: "flex-end" },
-  retryBtn: { padding: "12px 20px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: "600", fontSize: "14px" },
-  saveBtn: { padding: "12px 24px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: "700", fontSize: "14px" },
   filterWrap: { display: "flex", gap: "16px", marginBottom: "20px", flexWrap: "wrap", background: "white", padding: "16px 20px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   filterItem: { display: "flex", alignItems: "center", gap: "8px" },
   filterLabel: { fontSize: "14px", fontWeight: "600", color: "#374151" },
@@ -504,9 +396,10 @@ var st = {
   jenisTag: { padding: "2px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700" },
   soalText: { margin: 0, fontSize: "15px", fontWeight: "600", lineHeight: "1.5", color: "#1a1a1a" },
   pilihanList: { display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" },
-  pilihanRow: { display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px" },
-  pilihanKey: { width: "28px", height: "28px", borderRadius: "6px", color: "white", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "700", fontSize: "13px", flexShrink: 0 },
+  pilihanItem: { display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px" },
+  pilihanKeyShow: { width: "28px", height: "28px", borderRadius: "6px", color: "white", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "700", fontSize: "13px", flexShrink: 0 },
   benarText: { marginLeft: "auto", fontSize: "12px", fontWeight: "600", color: "#16a34a" },
   kunciBtn: { padding: "8px 16px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "13px", marginBottom: "8px" },
+  kunciBox: { padding: "12px 16px", background: "#fef3c7", borderRadius: "8px", border: "1px solid #fde68a" },
   hapusBtn: { display: "block", width: "100%", padding: "10px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", marginTop: "12px" },
 }

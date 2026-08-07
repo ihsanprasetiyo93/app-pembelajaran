@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "../../../lib/supabaseClient"
-import { generateContohKongkrit } from "../../../lib/gemini"
 import { useRouter } from "next/navigation"
 
 export default function SiswaMateriPage() {
@@ -11,11 +10,6 @@ export default function SiswaMateriPage() {
   const [materiList, setMateriList] = useState([])
   const [loading, setLoading] = useState(true)
   const [openMateri, setOpenMateri] = useState(null)
-  const [aiPopup, setAiPopup] = useState(null)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiResult, setAiResult] = useState("")
-  const [selectedText, setSelectedText] = useState("")
-  const [selectedMateriIsi, setSelectedMateriIsi] = useState("")
   const router = useRouter()
 
   useEffect(function () { loadData() }, [])
@@ -25,57 +19,37 @@ export default function SiswaMateriPage() {
     var authUser = authResult.data.user
     if (!authUser) { router.push("/login"); return }
 
-    var userResult = await supabase.from("users").select("*, kelas(nama_kelas, tingkat, jenjang)").eq("id", authUser.id).single()
+    var userResult = await supabase.from("users").select("*").eq("id", authUser.id).single()
     if (!userResult.data || userResult.data.role !== "siswa") { router.push("/dashboard"); return }
 
     setUser(userResult.data)
-    setKelasUser(userResult.data.kelas)
 
-    var tingkatUser = userResult.data.kelas ? userResult.data.kelas.tingkat : null
-
-    if (!tingkatUser) {
-      setMateriList([])
-      setLoading(false)
-      return
+    var tingkatUser = null
+    if (userResult.data.kelas_id) {
+      var kelasResult = await supabase.from("kelas").select("*").eq("id", userResult.data.kelas_id).single()
+      if (kelasResult.data) {
+        setKelasUser(kelasResult.data)
+        tingkatUser = kelasResult.data.tingkat
+      }
     }
+
+    if (!tingkatUser) { setLoading(false); return }
 
     var materiResult = await supabase.from("materi").select("*").eq("tingkat", tingkatUser).order("pertemuan_ke", { ascending: true })
 
     var materiDenganGuru = await Promise.all(
       (materiResult.data || []).map(async function (item) {
-        var guruResult = await supabase.from("users").select("nama").eq("id", item.guru_id).single()
-        return { ...item, guru_nama: guruResult.data ? guruResult.data.nama : "Guru" }
+        var guruResult = await supabase.from("users").select("nama, foto_url").eq("id", item.guru_id).single()
+        return {
+          ...item,
+          guru_nama: guruResult.data ? guruResult.data.nama : "Guru",
+          guru_foto: guruResult.data ? guruResult.data.foto_url : null,
+        }
       })
     )
 
     setMateriList(materiDenganGuru)
     setLoading(false)
-  }
-
-  function handleTextSelect(materiIsi) {
-    var selection = window.getSelection()
-    var text = selection ? selection.toString().trim() : ""
-    if (text.length < 3) { setAiPopup(null); return }
-    setSelectedText(text)
-    setSelectedMateriIsi(materiIsi)
-    setAiResult("")
-    setAiPopup("menu")
-  }
-
-  async function handleAskAI() {
-    if (!selectedText) return
-    setAiPopup("result")
-    setAiLoading(true)
-    setAiResult("")
-
-    var result = await generateContohKongkrit(selectedText, selectedMateriIsi)
-    setAiResult(result.success ? result.data : "Ihsan AI gagal merespons. Coba lagi!")
-    setAiLoading(false)
-  }
-
-  function closePopup() {
-    setAiPopup(null); setAiResult(""); setSelectedText("")
-    if (window.getSelection) window.getSelection().removeAllRanges()
   }
 
   if (loading) {
@@ -89,17 +63,10 @@ export default function SiswaMateriPage() {
         <h1 style={st.title}>📖 Materi Pelajaran</h1>
       </div>
 
-      {/* Info Kelas */}
       <div style={st.kelasInfo}>
         <p style={{ margin: 0, fontSize: "14px" }}>
           🏫 Kelas: <strong>{kelasUser ? kelasUser.nama_kelas : "Belum ada kelas"}</strong>
           {kelasUser && <span> • {kelasUser.jenjang}</span>}
-        </p>
-      </div>
-
-      <div style={st.aiInfoCard}>
-        <p style={{ margin: 0, fontSize: "14px" }}>
-          ✨ <strong>Ihsan AI</strong> siap membantu! Seleksi teks di materi untuk mendapat contoh konkrit.
         </p>
       </div>
 
@@ -118,69 +85,44 @@ export default function SiswaMateriPage() {
           {materiList.map(function (item) {
             return (
               <div key={item.id} style={st.materiCard}>
-                <div onClick={function () { setOpenMateri(openMateri === item.id ? null : item.id); setAiPopup(null) }} style={st.materiHeader}>
+                <div
+                  onClick={function () { setOpenMateri(openMateri === item.id ? null : item.id) }}
+                  style={st.materiHeader}
+                >
                   <div style={st.pertemuanBadge}>Pertemuan {item.pertemuan_ke}</div>
                   <div style={{ flex: 1 }}>
                     <h3 style={st.materiJudul}>{item.judul}</h3>
-                    <p style={st.materiMeta}>👨‍🏫 {item.guru_nama} • 🗓️ {new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
+                    <div style={st.guruInfo}>
+                      {item.guru_foto ? (
+                        <img src={item.guru_foto} alt="Guru" style={st.guruFoto} />
+                      ) : (
+                        <div style={st.guruAvatar}>{item.guru_nama.charAt(0).toUpperCase()}</div>
+                      )}
+                      <p style={st.materiMeta}>
+                        👨‍🏫 {item.guru_nama} • 🗓️ {new Date(item.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
+                      </p>
+                    </div>
                   </div>
                   <div style={st.expandIcon}>{openMateri === item.id ? "▲" : "▼"}</div>
                 </div>
 
                 {openMateri === item.id && (
                   <div style={st.materiBody}>
-                    <div style={st.aiHint}>💡 Seleksi teks untuk tanya <strong>Ihsan AI</strong></div>
-                    <div style={st.materiIsi} onMouseUp={function () { handleTextSelect(item.isi) }}>
+                    <div style={st.materiIsi}>
                       {item.isi.split("\n").map(function (p, i) {
                         return <p key={i} style={{ margin: "0 0 10px 0", lineHeight: "1.8" }}>{p}</p>
                       })}
                     </div>
-                    {item.file_url && <a href={item.file_url} target="_blank" rel="noopener noreferrer" style={st.downloadBtn}>📎 Download File</a>}
+                    {item.file_url && (
+                      <a href={item.file_url} target="_blank" rel="noopener noreferrer" style={st.downloadBtn}>
+                        📎 Download File Materi
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
             )
           })}
-        </div>
-      )}
-
-      {/* AI Floating Button */}
-      {aiPopup === "menu" && (
-        <div style={st.floatingBtn}>
-          <button onClick={handleAskAI} style={st.aiMenuBtn}>✨ Ihsan AI - Contoh Konkrit</button>
-          <button onClick={closePopup} style={st.aiCancelBtn}>✕</button>
-        </div>
-      )}
-
-      {/* AI Result Modal */}
-      {aiPopup === "result" && (
-        <div style={st.aiOverlay}>
-          <div style={st.aiModal}>
-            <div style={st.aiModalHeader}>
-              <div style={st.aiLogo}><span style={{ fontSize: "20px" }}>✨</span><span style={{ fontWeight: "700", fontSize: "16px" }}>Ihsan AI</span></div>
-              <button onClick={closePopup} style={st.closeBtn}>✕</button>
-            </div>
-            <div style={st.aiSelectedText}>
-              <p style={{ margin: 0, fontSize: "12px", color: "#6b7280", marginBottom: "4px" }}>Teks yang dipilih:</p>
-              <p style={{ margin: 0, fontSize: "14px", fontStyle: "italic", color: "#374151" }}>"{selectedText.length > 100 ? selectedText.substring(0, 100) + "..." : selectedText}"</p>
-            </div>
-            <div style={st.aiContent}>
-              {aiLoading ? (
-                <div style={st.aiLoadingWrap}><div style={st.aiSpinner}></div><p style={{ margin: "12px 0 0 0", color: "#6b7280", fontSize: "14px" }}>Ihsan AI sedang berpikir...</p></div>
-              ) : (
-                <div>
-                  <p style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "700", color: "#667eea" }}>💡 Contoh Konkrit:</p>
-                  <p style={{ margin: 0, fontSize: "14px", color: "#374151", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>{aiResult}</p>
-                </div>
-              )}
-            </div>
-            {!aiLoading && (
-              <div style={st.aiModalFooter}>
-                <button onClick={handleAskAI} style={st.retryBtn}>🔄 Tanya Lagi</button>
-                <button onClick={closePopup} style={st.closeModalBtn}>Tutup</button>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -194,33 +136,19 @@ var st = {
   header: { display: "flex", alignItems: "center", gap: "16px", marginBottom: "20px", flexWrap: "wrap" },
   backBtn: { padding: "10px 18px", background: "white", border: "2px solid #e5e7eb", borderRadius: "10px", cursor: "pointer", fontSize: "14px", fontWeight: "600", color: "#374151" },
   title: { flex: 1, margin: 0, fontSize: "28px", color: "#1a1a1a" },
-  kelasInfo: { background: "white", padding: "14px 20px", borderRadius: "12px", marginBottom: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", border: "2px solid #dbeafe" },
-  aiInfoCard: { background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", padding: "16px 20px", borderRadius: "12px", marginBottom: "20px" },
+  kelasInfo: { background: "white", padding: "14px 20px", borderRadius: "12px", marginBottom: "20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", border: "2px solid #dbeafe" },
   empty: { textAlign: "center", background: "white", padding: "48px", borderRadius: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
   listWrap: { display: "flex", flexDirection: "column", gap: "16px" },
   materiCard: { background: "white", borderRadius: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden" },
   materiHeader: { display: "flex", alignItems: "center", gap: "12px", padding: "20px 24px", cursor: "pointer", flexWrap: "wrap" },
   pertemuanBadge: { padding: "4px 12px", background: "#dbeafe", color: "#1e40af", borderRadius: "20px", fontSize: "12px", fontWeight: "700", flexShrink: 0 },
-  materiJudul: { margin: "0 0 4px 0", fontSize: "17px", color: "#1a1a1a", fontWeight: "700" },
+  materiJudul: { margin: "0 0 6px 0", fontSize: "17px", color: "#1a1a1a", fontWeight: "700" },
+  guruInfo: { display: "flex", alignItems: "center", gap: "8px" },
+  guruFoto: { width: "28px", height: "28px", borderRadius: "50%", objectFit: "cover", border: "2px solid #667eea" },
+  guruAvatar: { width: "28px", height: "28px", borderRadius: "50%", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", fontWeight: "700", flexShrink: 0 },
   materiMeta: { margin: 0, fontSize: "12px", color: "#6b7280" },
   expandIcon: { fontSize: "14px", color: "#9ca3af", flexShrink: 0 },
   materiBody: { padding: "0 24px 24px 24px", borderTop: "1px solid #e5e7eb" },
-  aiHint: { padding: "10px 14px", background: "#f0f4ff", borderRadius: "8px", fontSize: "13px", color: "#4b5563", marginTop: "16px", marginBottom: "16px", border: "1px solid #e0e7ff" },
-  materiIsi: { fontSize: "15px", color: "#374151", lineHeight: "1.8", cursor: "text", marginBottom: "16px" },
+  materiIsi: { fontSize: "15px", color: "#374151", lineHeight: "1.8", padding: "16px 0" },
   downloadBtn: { display: "inline-block", padding: "12px 20px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", borderRadius: "10px", textDecoration: "none", fontWeight: "600", fontSize: "14px" },
-  floatingBtn: { position: "fixed", bottom: "24px", left: "50%", transform: "translateX(-50%)", display: "flex", gap: "8px", zIndex: 9999, background: "white", padding: "8px", borderRadius: "14px", boxShadow: "0 8px 24px rgba(0,0,0,0.15)" },
-  aiMenuBtn: { padding: "12px 20px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "14px", fontWeight: "600", whiteSpace: "nowrap" },
-  aiCancelBtn: { padding: "12px 16px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "16px", fontWeight: "700" },
-  aiOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999, padding: "24px" },
-  aiModal: { background: "white", borderRadius: "20px", width: "100%", maxWidth: "500px", boxShadow: "0 20px 40px rgba(0,0,0,0.2)", overflow: "hidden" },
-  aiModalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white" },
-  aiLogo: { display: "flex", alignItems: "center", gap: "8px" },
-  closeBtn: { background: "rgba(255,255,255,0.2)", border: "none", color: "white", width: "32px", height: "32px", borderRadius: "50%", cursor: "pointer", fontSize: "16px", display: "flex", justifyContent: "center", alignItems: "center" },
-  aiSelectedText: { padding: "16px 24px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" },
-  aiContent: { padding: "20px 24px", minHeight: "120px" },
-  aiLoadingWrap: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px 0" },
-  aiSpinner: { width: "36px", height: "36px", border: "3px solid #e5e7eb", borderTop: "3px solid #667eea", borderRadius: "50%", animation: "spin 1s linear infinite" },
-  aiModalFooter: { display: "flex", gap: "10px", padding: "16px 24px", borderTop: "1px solid #e5e7eb", justifyContent: "flex-end" },
-  retryBtn: { padding: "10px 18px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px" },
-  closeModalBtn: { padding: "10px 18px", background: "linear-gradient(135deg, #667eea, #764ba2)", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px" },
 }
