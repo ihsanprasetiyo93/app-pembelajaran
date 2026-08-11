@@ -110,7 +110,18 @@ export default function DashboardPage() {
     }
 
     if (userResult.data.role === "siswa") {
-      var materiCount = await supabase.from("materi").select("*", { count: "exact", head: true }).eq("tingkat", userResult.data.kelas_id || "")
+      // Cari tingkat siswa dari tabel kelas
+      var tingkatSiswa = ""
+      if (userResult.data.kelas_id) {
+        var kelasData = await supabase.from("kelas").select("*").eq("id", userResult.data.kelas_id).single()
+        if (kelasData.data) {
+          tingkatSiswa = kelasData.data.tingkat || ""
+        } else {
+          tingkatSiswa = userResult.data.kelas_id
+        }
+      }
+
+      var materiCount = await supabase.from("materi").select("*", { count: "exact", head: true }).eq("tingkat", tingkatSiswa)
       var nilaiSiswa = await supabase.from("nilai").select("skor").eq("siswa_id", authUser.id)
       var rataSiswa = 0
       if (nilaiSiswa.data && nilaiSiswa.data.length > 0) {
@@ -221,7 +232,6 @@ export default function DashboardPage() {
   var current = MAHFUDZOT[mahfudzotIdx]
   var greet = getGreeting()
 
-  // Greeting card style dengan background image + gradient overlay
   var greetCardStyle = greetingBgUrl ? {
     ...st.greetCard,
     backgroundImage: "linear-gradient(to right, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.85) 30%, rgba(255,255,255,0.3) 60%, rgba(255,255,255,0) 100%), url(" + greetingBgUrl + ")",
@@ -271,7 +281,6 @@ export default function DashboardPage() {
       </header>
 
       <div style={st.heroGrid}>
-        {/* MAHFUDZOT */}
         <div style={st.mahfudzotCard}>
           <div style={st.mahfudzotDeco1}></div>
           <div style={st.mahfudzotDeco2}></div>
@@ -311,7 +320,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* GREETING CARD DENGAN BACKGROUND */}
         <div style={greetCardStyle}>
           {isGuru && (
             <div style={st.bgControls}>
@@ -338,12 +346,6 @@ export default function DashboardPage() {
           <h2 style={st.greetTitle}>{greet.text},</h2>
           <h3 style={st.greetName}>{user.nama}!</h3>
           <p style={st.greetDesc}>{isGuru ? "Siap membuat pembelajaran yang menginspirasi hari ini?" : "Siap menuntut ilmu dan meraih prestasi hari ini?"}</p>
-
-          {!greetingBgUrl && isGuru && (
-            <div style={st.bgHint}>
-              💡 Klik icon 🖼️ untuk upload background
-            </div>
-          )}
         </div>
       </div>
 
@@ -377,6 +379,7 @@ export default function DashboardPage() {
           <>
             <MenuCard emoji="📚" title="Materi" desc="Upload dan kelola materi pembelajaran" color1="#667eea" color2="#764ba2" onClick={function () { router.push("/guru/materi") }} />
             <MenuCard emoji="❓" title="Soal & Kuis" desc="Buat soal PG dan Essay" color1="#f093fb" color2="#f5576c" onClick={function () { router.push("/guru/soal") }} />
+            <MenuCard emoji="📄" title="RPP" desc="Buat & download RPP format Word" color1="#f97316" color2="#ea580c" onClick={function () { router.push("/guru/rpp") }} />
             <MenuCard emoji="📊" title="Nilai Siswa" desc="Lihat & koreksi nilai siswa" color1="#4facfe" color2="#00f2fe" onClick={function () { router.push("/guru/nilai") }} />
             <MenuCard emoji="🎓" title="Kelola Siswa" desc="Approve siswa & status online" color1="#43e97b" color2="#38f9d7" onClick={function () { router.push("/guru/siswa") }} />
             <MenuCard emoji="📅" title="Absensi" desc="Kelola absensi siswa" color1="#fa709a" color2="#fee140" onClick={function () { router.push("/guru/absensi") }} />
@@ -432,19 +435,7 @@ function MenuCard({ emoji, title, desc, color1, color2, onClick }) {
 }
 
 var st = {
-  container: {
-  minHeight: "100vh",
-  background: `
-    linear-gradient(135deg, rgba(240, 244, 255, 0.92) 0%, rgba(224, 231, 255, 0.90) 50%, rgba(252, 231, 243, 0.92) 100%),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1200 600'><g fill='%23667eea' opacity='0.15'><path d='M85,285 Q95,275 110,278 L145,275 Q160,272 175,280 L195,285 Q210,290 220,295 L235,300 Q245,302 250,300 L245,308 Q240,315 235,315 L220,318 Q210,320 200,318 L180,315 Q160,312 145,308 L125,305 Q110,302 100,298 Z'/><path d='M280,290 Q300,275 340,278 L400,275 Q450,275 490,282 L530,290 Q555,295 560,305 Q555,315 540,318 L490,325 Q440,328 400,325 L350,320 Q315,315 295,308 Z'/><path d='M330,340 Q340,335 355,338 L370,342 Q380,345 385,352 Q380,360 370,362 L355,363 Q340,362 335,358 Z'/><path d='M600,320 Q620,310 655,315 L695,320 Q720,325 735,335 L745,345 Q748,355 735,362 L710,368 Q680,370 655,368 L625,363 Q605,358 598,350 Z'/><path d='M780,315 Q820,305 875,310 L935,315 Q980,320 1000,332 L1010,342 Q1005,355 985,362 L940,368 Q890,370 850,368 L810,363 Q788,358 780,350 Z'/><path d='M1050,340 Q1075,330 1100,335 L1120,340 Q1130,345 1128,353 L1122,362 Q1108,368 1090,368 L1070,365 Q1055,362 1048,355 Z'/><circle cx='260' cy='305' r='4'/><circle cx='265' cy='320' r='3'/><circle cx='255' cy='325' r='2.5'/><circle cx='575' cy='345' r='3'/><circle cx='770' cy='355' r='3.5'/><circle cx='1035' cy='370' r='3'/></g></svg>")
-  `,
-  backgroundSize: "cover, 100% auto",
-  backgroundPosition: "center, center bottom",
-  backgroundRepeat: "no-repeat, no-repeat",
-  backgroundAttachment: "fixed, fixed",
-  padding: "24px",
-  fontFamily: "'Segoe UI', system-ui, sans-serif",
-},
+  container: { minHeight: "100vh", background: "linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 50%, #fce7f3 100%)", padding: "24px", fontFamily: "'Segoe UI', system-ui, sans-serif" },
   center: { minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" },
   spinner: { width: "40px", height: "40px", borderWidth: "4px", borderStyle: "solid", borderColor: "#e0e0e0", borderTopColor: "#667eea", borderRadius: "50%", animation: "spin 1s linear infinite" },
 
@@ -487,36 +478,19 @@ var st = {
   dotsWrap: { display: "flex", gap: "6px", alignItems: "center" },
   dot: { height: "6px", borderRadius: "3px", transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)" },
 
-  // GREETING CARD (dengan support background image)
-  greetCard: {
-    position: "relative",
-    background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
-    borderRadius: "24px",
-    padding: "28px",
-    boxShadow: "0 8px 32px rgba(102, 126, 234, 0.12)",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(102, 126, 234, 0.1)",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    minHeight: "320px",
-    overflow: "hidden",
-  },
+  greetCard: { position: "relative", background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)", borderRadius: "24px", padding: "28px", boxShadow: "0 8px 32px rgba(102, 126, 234, 0.12)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(102, 126, 234, 0.1)", display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: "320px", overflow: "hidden" },
   bgControls: { position: "absolute", top: "12px", right: "12px", display: "flex", gap: "6px", zIndex: 10 },
   bgUploadBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", background: "rgba(255,255,255,0.95)", borderRadius: "8px", cursor: "pointer", fontSize: "14px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", borderWidth: "1px", borderStyle: "solid", borderColor: "rgba(102, 126, 234, 0.2)" },
   bgRemoveBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", background: "rgba(254, 226, 226, 0.95)", color: "#dc2626", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "14px", fontWeight: "700", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" },
-  bgHint: { marginTop: "12px", padding: "8px 12px", background: "rgba(239, 246, 255, 0.9)", borderRadius: "8px", fontSize: "11px", color: "#3b82f6", textAlign: "center", fontWeight: "600" },
-
   greetTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px", position: "relative", zIndex: 2 },
   greetEmoji: { fontSize: "56px", lineHeight: "1", filter: "drop-shadow(0 4px 12px rgba(0,0,0,0.15))" },
   greetDate: { textAlign: "center", padding: "10px 16px", background: "linear-gradient(135deg, #eef2ff, #e0e7ff)", borderRadius: "14px", boxShadow: "0 4px 12px rgba(102, 126, 234, 0.2)" },
   dateDay: { margin: 0, fontSize: "10px", color: "#667eea", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px" },
   dateNumber: { margin: "2px 0", fontSize: "28px", fontWeight: "800", color: "#4338ca", lineHeight: "1" },
   dateMonth: { margin: 0, fontSize: "10px", color: "#667eea", fontWeight: "600" },
-  greetTitle: { margin: "0", fontSize: "22px", color: "#4b5563", fontWeight: "600", position: "relative", zIndex: 2, textShadow: "0 1px 2px rgba(255,255,255,0.8)" },
+  greetTitle: { margin: "0", fontSize: "22px", color: "#4b5563", fontWeight: "600", position: "relative", zIndex: 2 },
   greetName: { margin: "4px 0 12px 0", fontSize: "26px", background: "linear-gradient(135deg, #667eea, #764ba2)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", fontWeight: "800", letterSpacing: "-0.5px", position: "relative", zIndex: 2 },
-  greetDesc: { margin: 0, fontSize: "14px", color: "#4b5563", lineHeight: "1.6", position: "relative", zIndex: 2, fontWeight: "500", textShadow: "0 1px 2px rgba(255,255,255,0.5)" },
+  greetDesc: { margin: 0, fontSize: "14px", color: "#4b5563", lineHeight: "1.6", position: "relative", zIndex: 2, fontWeight: "500" },
 
   sectionTitle: { display: "flex", alignItems: "center", gap: "10px", margin: "0 0 18px 0", fontSize: "20px", color: "#1a1a1a", fontWeight: "800" },
   sectionEmoji: { fontSize: "24px" },
